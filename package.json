@@ -1,0 +1,16 @@
+{
+  "name": "suno-pro",
+  "version": "2.4.4",
+  "description": "Suno Pro 2.4.4",
+  "main": "electron/main.js",
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
+    "youtubei.js": "^18.3.0"
+  },
+  "devDependencies": {
+    "electron": "^44.8.0",
+    "electron-packager": "^17.1.2"
+  }
+}

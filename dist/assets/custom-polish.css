@@ -1,0 +1,659 @@
+/* ──────────────────────────────────────────────────────────────────────
+   Custom visual polish — ADDITIVE ONLY.
+   This file never removes or overrides element IDs/behavior; it only
+   refines colors, spacing and adds collapsible grouping for less-used
+   panels. Loaded AFTER main-CtjhM9ST.css so these rules take priority
+   purely by source order (no !important abuse, easy to revert: just
+   remove the <link> tag in index.html).
+   ────────────────────────────────────────────────────────────────────── */
+
+/* ── "Suno Pro" palette ────────────────────────────────────────────────
+   Colors, typography and shape language copied from the reference app
+   at TOOL SUNO Extension/desktop (renderer/style.css), applied here by
+   overriding the SAME CSS variables the main stylesheet already uses —
+   no HTML/JS touched, purely re-skinning. Applied to :root AND both
+   [data-theme] variants so it wins regardless of the app's own
+   auto-detect; a tiny inline script in index.html also forces the
+   data-theme attribute itself to "dark" (two spots in the app's JS
+   paint canvases by reading that attribute directly, not via CSS). */
+:root,
+:root[data-theme="dark"],
+:root[data-theme="light"] {
+  --theme-background: #12151b;      /* --bg */
+  --bg-card: #1d222b;                /* --card */
+  --bg-card-hover: #232934;          /* --card-2 */
+  --bg-elevated: #171b22;            /* --bg-2 */
+  --border: #2e3542;                 /* --line */
+  --border-subtle: rgba(46, 53, 66, .6);
+  --text-primary: #e9edf3;           /* --text */
+  --text-secondary: #9aa4b4;         /* --muted */
+  --text-muted: #6c7686;             /* --faint */
+
+  --theme-accent: #1fb5b5;           /* --primary */
+  --theme-accent-secondary: #138c8c; /* --primary-2 */
+  --theme-accent-light: #4dd9d9;
+  --accent-gradient: linear-gradient(135deg, #1fb5b5 0%, #138c8c 100%);
+  --on-primary: #04211f;             /* readable text color sitting on the teal gradient */
+
+  --green: #2dd4bf;                  /* --ok */
+  --green-bg: rgba(45, 212, 191, .14);
+  --red: #ff8a8a;                    /* --bad */
+  --red-bg: rgba(255, 138, 138, .14);
+  --yellow: #f2c46d;                 /* --warn */
+
+  --waveform-bg: rgba(0, 0, 0, .35);
+  --spectrogram-bg: #0c0f14;
+  --fader-track: #2e3542;
+  --fader-thumb-from: #1fb5b5;
+  --fader-thumb-to: #138c8c;
+  --fader-thumb-border: #0f6f6f;
+  --fader-thumb-hover-from: #4dd9d9;
+  --fader-thumb-hover-to: #1fb5b5;
+  --tooltip-bg: #1d222b;
+  --select-option-bg: #171b22;
+  --meter-peak-shadow: rgba(31, 181, 181, .6);
+  --time-bg: rgba(0, 0, 0, .6);
+  --toggle-track-bg: #2e3542;
+  --slider-track-bg: #2e3542;
+}
+
+/* Typography scale (reference: fs-title 13px / fs-body 12.5px / fs-small 11px) */
+body {
+  font-size: 12.5px;
+}
+.settings-card h3,
+.suno-panel-label,
+.cm-modal-header,
+.cm-blocker-title,
+.logo-title {
+  font-size: 13px !important;
+}
+.suno-status,
+.suno-url-hint,
+.suno-file-name,
+.step-tag,
+.section-label {
+  font-size: 11px;
+}
+
+/* Shape language: 10px cards, 8px controls, 14px dialogs (reference values) */
+.settings-card,
+.suno-panel,
+.file-zone,
+.batch-panel,
+.suno-split-panel {
+  border-radius: 10px;
+}
+.cm-modal,
+.cm-blocker-box,
+.activation-dialog {
+  border-radius: 14px !important;
+}
+.btn-export,
+.suno-connect-btn,
+.suno-test-btn,
+.suno-btn-ghost,
+.btn-select,
+.btn-change,
+.btn-preset,
+.btn-batch,
+.ed-btn,
+.preset-btn,
+.suno-select,
+.suno-session-input,
+.suno-seconds-input,
+.suno-timeline-input,
+input[type="text"],
+select,
+textarea {
+  border-radius: 8px !important;
+}
+.header-icon-btn,
+.cm-modal-close,
+.win-btn,
+.btn-icon {
+  border-radius: 7px !important;
+}
+.suno-split-count {
+  border-radius: 999px;
+}
+
+/* Button height: 30px, flex-centered content (reference uses a flat 30px
+   height everywhere instead of padding-driven sizing) */
+.suno-connect-btn,
+.suno-test-btn,
+.suno-btn-ghost,
+.btn-select,
+.btn-change,
+.btn-preset,
+.btn-batch,
+.ed-btn {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Native form controls: min-height only (flex display is unreliable on
+   <select>/<input> across platforms) */
+.suno-select,
+.suno-session-input,
+.suno-seconds-input {
+  min-height: 30px;
+}
+
+/* Shadows read as too heavy on a plain dark card background */
+.settings-card,
+.suno-split-panel,
+.cm-modal {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25) !important;
+}
+.settings-card:hover {
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .3) !important;
+}
+
+/* Subtle depth behind the top bar */
+.top-bar {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0) 60%);
+  position: relative;
+}
+
+/* App name centered in the header (macOS-style: icon stays left, title is
+   centered regardless of how much content sits on each side). The original
+   inline title next to the logo icon is hidden; a new absolutely-centered
+   element shows the name instead — additive, the logo icon itself is kept. */
+.logo .logo-text {
+  display: none;
+}
+.top-bar-center-title {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Section labels (purely decorative, non-interactive) */
+.section-label {
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 2px 2px 0;
+}
+
+/* Cards: a touch more depth + smoother hover lift */
+.settings-card {
+  box-shadow: 0 1px 2px rgba(0,0,0,.3);
+  transition: background .2s ease, box-shadow .2s ease, transform .15s ease;
+}
+.settings-card:hover {
+  box-shadow: 0 4px 10px rgba(0,0,0,.35);
+}
+
+/* ── TEMP: Mastering Controls + Loudness & EQ hidden on request ──────
+   Elements stay in the DOM (ids/values untouched, JS reads them fine) —
+   only visually hidden. To bring them back, delete this rule (or the
+   "temp-hidden-mastering" class on the 4 elements in index.html). */
+.temp-hidden-mastering {
+  display: none !important;
+}
+
+/* ── Header cleanup ───────────────────────────────────────────────────
+   Hides unused header chrome on request (MP3 quick-export trio, the
+   "Show Tips" checkbox, the small LUFS/Peak/Format status text). Same
+   display:none-only approach — ids stay in the DOM, their default
+   values/checked state are untouched, so nothing JS reads can break. */
+.header-hidden-unused {
+  display: none !important;
+}
+
+/* Primary export CTA gets the gradient treatment so it reads as THE action */
+.btn-export {
+  background: var(--accent-gradient);
+  color: var(--on-primary);
+  box-shadow: 0 2px 8px rgba(31,181,181,.35);
+  height: 30px;
+}
+.btn-export:hover:not(:disabled) {
+  box-shadow: 0 4px 14px rgba(31,181,181,.45);
+}
+
+/* ── Generic "remove from view, keep in DOM" utility ──────────────────
+   Used across this redesign for anything the user asked to remove: the
+   element and its id/handlers stay fully intact in the DOM (so nothing
+   the app's JS reads/writes can break), only display:none visually. */
+.ui-removed {
+  display: none !important;
+}
+
+/* ── File zone: collapse to one row (file info + transport + waveform),
+   meters/spectrogram hidden via .ui-removed on their own elements. */
+.file-loaded {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+}
+.file-header {
+  flex: 0 0 auto;
+  max-width: 220px;
+  min-width: 0;
+}
+.file-info-row {
+  width: auto;
+}
+.file-details {
+  min-width: 0;
+}
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.audio-player {
+  flex: 1;
+  min-width: 0;
+  border-top: none;
+  padding-top: 0;
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 14px;
+}
+
+/* ── Header icon buttons (Settings / Download) ────────────────────────
+   New, additive — open the two popups below. Plain round icon buttons
+   matching the window-controls visual weight already in the header. */
+.header-icon-group {
+  display: flex;
+  gap: 6px;
+  margin-left: 4px;
+}
+.header-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s ease, border-color .15s ease;
+}
+.header-icon-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--theme-accent-light);
+}
+
+/* ── Shared "card" building blocks reused by both the modals and the
+   standalone Split-Studio panel ───────────────────────────────────── */
+
+/* Step grouping: small decorative labels (plain <span>, no id — nothing
+   JS reads) breaking a long button row into clearly labeled steps.
+   flex-basis:100% forces everything after it onto a new line. */
+.step-tag {
+  flex: 1 1 100%;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--theme-accent-secondary);
+  margin: 2px 0 1px;
+}
+.step-tag-alt {
+  color: var(--text-muted);
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+/* Secondary / fallback actions: de-emphasized "ghost" style so the one
+   recommended action (gradient button) clearly reads as the main path */
+.suno-btn-ghost {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.suno-btn-ghost:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-secondary);
+}
+
+/* The pipeline's end result gets a touch more presence than the other
+   gradient buttons in the same row */
+.suno-btn-final {
+  padding: 7px 16px;
+  font-size: 12px;
+  box-shadow: 0 2px 6px rgba(31, 181, 181, .3);
+}
+.suno-btn-final:hover {
+  box-shadow: 0 3px 10px rgba(31, 181, 181, .4);
+}
+
+.suno-connect-btn {
+  background: var(--accent-gradient) !important;
+  border: none !important;
+  color: var(--on-primary) !important;
+}
+
+/* ── Suno Split-Studio: the one tool that stays inline in the main view,
+   redesigned as 3 explicit steps instead of one long button strip. */
+.suno-split-panel {
+  gap: 10px;
+}
+.suno-split-title-row {
+  margin-bottom: 2px;
+}
+.suno-split-title-row .suno-panel-label {
+  font-size: 13px;
+}
+.suno-split-step {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 8px 12px;
+  border-left: 3px solid var(--border);
+}
+.suno-split-step:focus-within,
+.suno-split-step:hover {
+  border-left-color: var(--theme-accent-light);
+}
+.suno-split-step-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.suno-split-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--theme-accent);
+  background: var(--bg-elevated);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+/* ── Header-icon popups (Suno Upload / Suno Download) ─────────────────
+   Same visual language as the existing license-activation overlay
+   (centered dialog over a blurred backdrop) for consistency. */
+.cm-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .35);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.cm-modal-overlay.hidden {
+  display: none;
+}
+.cm-modal {
+  width: 640px;
+  max-width: 92vw;
+  max-height: 86vh;
+  overflow: auto;
+  background: var(--theme-background);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+}
+.cm-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  position: sticky;
+  top: 0;
+  background: var(--theme-background);
+}
+.cm-modal-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.cm-modal-close:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+.cm-modal-body {
+  padding: 14px 16px;
+}
+.cm-modal-body .suno-panel {
+  background: transparent;
+  border: none;
+  margin-top: 0;
+  padding: 0;
+}
+
+/* ── Blocking overlay while Split-Studio uploads to Suno ──────────────
+   Covers the whole app; the only thing visible beneath it is dimmed and
+   non-interactive (pointer-events blocked by sitting on top). */
+.cm-blocker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.cm-blocker-overlay.hidden {
+  display: none;
+}
+.cm-blocker-box {
+  width: 380px;
+  max-width: 90vw;
+  background: var(--theme-background);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 26px 22px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
+.cm-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--theme-accent);
+  animation: cm-spin .8s linear infinite;
+}
+@keyframes cm-spin {
+  to { transform: rotate(360deg); }
+}
+.cm-blocker-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.cm-blocker-log {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  min-height: 16px;
+}
+
+/* Thin scrollbar (cosmetic only) */
+.main-content::-webkit-scrollbar,
+.cm-modal::-webkit-scrollbar {
+  width: 10px;
+}
+.main-content::-webkit-scrollbar-thumb,
+.cm-modal::-webkit-scrollbar-thumb {
+  background: var(--bg-elevated);
+  border-radius: 6px;
+}
+.main-content::-webkit-scrollbar-track,
+.cm-modal::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── "Upload" tab wrapping the whole Suno Pro step list ───────────────
+   Plain <details>/<summary>, open by default (it's the app's one and
+   only feature now). Same guard as every other disclosure in this file:
+   body display is scoped to [open] so the native collapsed-by-default
+   behavior is never fought by an always-on display:flex rule. */
+.suno-upload-tab {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 4px;
+}
+.suno-upload-tab > summary.suno-upload-tab-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 0 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.suno-upload-tab > summary.suno-upload-tab-summary::-webkit-details-marker {
+  display: none;
+}
+.suno-upload-tab > summary.suno-upload-tab-summary::before {
+  content: "▸";
+  color: var(--theme-accent-light);
+  transition: transform .15s ease;
+  font-size: 10px;
+}
+.suno-upload-tab[open] > summary.suno-upload-tab-summary::before {
+  transform: rotate(90deg);
+}
+.suno-upload-tab[open] > .suno-upload-tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+/* ── "Chuẩn bị" step: stacked layout (thumbnail + full-width controls)
+   instead of one inline row ───────────────────────────────────────── */
+.suno-prep-actions-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.suno-prep-actions-row > button {
+  flex: 1 1 0;
+  width: auto;
+}
+.suno-prep-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.suno-prep-thumb {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.suno-prep-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.suno-prep-thumb-icon {
+  font-size: 16px;
+  color: var(--text-muted);
+}
+.field-label-sm {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin: 2px 0 2px;
+}
+.suno-prep-secs-input {
+  width: 100%;
+}
+.suno-prep-cut-btn {
+  width: 100%;
+}
+
+/* ── YouTube modal pieces ──────────────────────────────────────────── */
+.suno-yt-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0;
+}
+.suno-yt-thumb {
+  width: 96px;
+  height: 54px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--bg-elevated);
+  flex: 0 0 auto;
+}
+.suno-yt-info-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.suno-yt-info-text b {
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.suno-yt-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.suno-yt-bar i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--accent-gradient);
+  transition: width .2s;
+}
+
+/* ── Single Upload/Stop toggle button (② Tải lên Suno) ────────────────
+   Visible stand-in for the real #sunoSplitUpload / #sunoSplitStop pair
+   (hidden via .ui-removed, still fully functional) — full width, turns
+   red + relabels to "Stop" while an upload is actually in progress. */
+.suno-upload-toggle-btn {
+  width: 100%;
+}
+.suno-upload-toggle-btn.is-uploading {
+  background: var(--red) !important;
+  color: #1a0b0b;
+}

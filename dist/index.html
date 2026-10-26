@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:5173; script-src 'self' 'unsafe-inline' http://localhost:5173; style-src 'self' 'unsafe-inline'; media-src 'self' file: blob:; img-src 'self' data: https:; connect-src 'self' ws://localhost:5173 http://localhost:5173">
+  <title>Suno Pro</title>
+  <script type="module" crossorigin src="./assets/main-9QM-JpB-.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/main-CtjhM9ST.css">
+  <link rel="stylesheet" href="./assets/custom-polish.css">
+  <!-- TEMP: ẩn popup activation để test, nhớ xóa trước khi build release -->
+  <style>#activationOverlay{display:none !important;}</style>
+</head>
+<body>
+  <!-- License Activation Gate -->
+  <div id="activationOverlay" class="activation-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="activationTitle">
+    <div class="activation-dialog">
+      <div class="activation-head">
+        <img src="./assets/image-CpZRRbD0.png" alt="Chicken Mastering logo" class="activation-logo">
+        <h2 id="activationTitle">Kích hoạt Chicken Mastering</h2>
+        <p class="activation-sub">Nhập mã kích hoạt để mở khóa ứng dụng.</p>
+        <p id="actMode" class="activation-sub" aria-live="polite"></p>
+      </div>
+
+      <div class="activation-field">
+        <span class="activation-label">Mã máy (MAC Address):</span>
+        <div class="activation-mac-row">
+          <input type="text" id="actMac" class="activation-input" readonly spellcheck="false" aria-label="MAC Address của máy này">
+          <button id="actCopyMac" class="activation-copy" aria-label="Sao chép mã máy" data-tip="Sao chép mã máy">⧉</button>
+        </div>
+      </div>
+
+      <p class="activation-note">Sao chép mã máy bên trên và gửi về email <strong>vudungit92@gmail.com</strong> để nhận mã kích hoạt.</p>
+
+      <div class="activation-field">
+        <span class="activation-label">Mã kích hoạt:</span>
+        <input type="text" id="actCode" class="activation-input" spellcheck="false" autocomplete="off"
+               placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" aria-label="Mã kích hoạt">
+      </div>
+
+      <button id="actSubmit" class="activation-submit">Kích hoạt</button>
+      <p id="actStatus" class="activation-status" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <!-- Top Bar -->
+  <header class="top-bar" role="banner">
+    <div class="top-bar-drag"></div>
+    <div class="logo">
+      <img src="./assets/image-CpZRRbD0.png" alt="Suno Pro logo" class="logo-icon">
+      <div class="logo-text">
+        <span class="logo-title">Suno Pro</span>
+      </div>
+    </div>
+    <div class="top-bar-center-title" aria-hidden="true">Suno Pro</div>
+
+    <div class="top-bar-right">
+      <div class="status-indicators header-hidden-unused" role="status" aria-live="polite">
+        <span class="status-item" id="mini-lufs" aria-label="Target loudness">• -14 LUFS</span>
+        <span class="status-item" id="mini-peak" aria-label="True peak limiting">• True Peak</span>
+        <span class="status-item" id="mini-format" aria-label="Export format">• WAV Ready</span>
+      </div>
+      <label class="tips-toggle header-hidden-unused">
+        <input type="checkbox" id="showTips" checked aria-label="Show tooltips">
+        <span>Show Tips</span>
+      </label>
+      <button id="processBtn" class="btn-export ui-removed" disabled aria-label="Export mastered WAV file (Ctrl+E)">
+        <span aria-hidden="true">🚀</span> Export WAV
+      </button>
+      <div class="mp3-export-group header-hidden-unused" role="group" aria-label="One-click MP3 exports">
+        <button id="mp3Easy" class="btn-mp3 btn-mp3-easy" data-flavor="easy" disabled
+          data-tip="Easy MP3 — bright, wide, clean stereo (fixed_0 style): sub + air lift, −14 LUFS, −1 dBTP, 48 kHz / 320 kbps CBR.">
+          Easy MP3
+        </button>
+        <button id="mp3Normal" class="btn-mp3 btn-mp3-normal" data-flavor="normal" disabled
+          data-tip="Normal MP3 — heavy phase-flip L≈−R like fixed_1 (mid nearly cancelled, wide/hollow). Mono-unsafe. −14 LUFS, 48 kHz / 320 kbps CBR.">
+          Normal MP3
+        </button>
+        <button id="mp3Hard" class="btn-mp3 btn-mp3-hard" data-flavor="hard" disabled
+          data-tip="Hard MP3 — even stronger phase-flip L≈−R like fixed_2 (mid almost gone). Mono-unsafe. −14 LUFS, 48 kHz / 320 kbps CBR.">
+          Hard MP3
+        </button>
+      </div>
+      <div class="header-icon-group" role="group" aria-label="Suno tools">
+        <button id="openSunoSettingsBtn" class="header-icon-btn" type="button" aria-label="Suno upload settings" data-tip="Cấu hình & đăng nhập Suno (Upload)">⚙️</button>
+        <button id="openSunoDownloadBtn" class="header-icon-btn" type="button" aria-label="Suno download" data-tip="Tải bài từ Suno về máy">⬇️</button>
+      </div>
+      <div class="window-controls" role="group" aria-label="Window controls">
+        <button class="win-btn minimize" id="minimizeBtn" aria-label="Minimize window">─</button>
+        <button class="win-btn maximize" id="maximizeBtn" aria-label="Maximize window">□</button>
+        <button class="win-btn close" id="closeBtn" aria-label="Close window">✕</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content" role="main">
+    <!-- File Drop Zone -->
+    <div class="file-zone ui-removed" id="dropZone" role="region" aria-label="Audio file drop zone">
+      <div class="file-zone-content" id="fileZoneContent">
+        <div class="drop-icon" aria-hidden="true">📁</div>
+        <p>Drop audio file here or</p>
+        <button id="selectFile" class="btn-select" aria-label="Browse for audio files">Browse Files</button>
+        <span class="file-types">MP3, WAV, FLAC, AAC, M4A, MP4</span>
+      </div>
+      <div class="file-loaded hidden" id="fileLoaded">
+        <div class="file-header">
+          <div class="file-info-row">
+            <span class="file-icon" aria-hidden="true">🎵</span>
+            <div class="file-details">
+              <span class="file-name" id="fileName">No file</span>
+              <span class="file-meta" id="fileMeta">--</span>
+              <span class="file-dc hidden" id="dcBadge" data-tip="DC offset detected on load and removed — restores headroom and prevents clicks at edit points.">DC 0%</span>
+            </div>
+            <button id="changeFile" class="btn-change" aria-label="Change audio file">Change</button>
+          </div>
+        </div>
+        <div class="audio-player" role="group" aria-label="Audio player controls">
+          <button id="playBtn" class="btn-play-main" disabled aria-label="Play or pause (Space)">
+            <span id="playIcon" aria-hidden="true">▶</span>
+          </button>
+          <button id="stopBtn" class="btn-stop" disabled aria-label="Stop playback (Escape)">■</button>
+          <div class="waveform-container" role="slider" aria-label="Playback position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+            <canvas id="waveformCanvas" aria-hidden="true"></canvas>
+            <div class="waveform-progress" id="waveformProgress"></div>
+            <div class="waveform-time-overlay">
+              <span id="currentTime" class="time" aria-label="Current time">0:00</span>
+              <span id="duration" class="time" aria-label="Total duration">0:00</span>
+            </div>
+          </div>
+          <button id="bypassBtn" class="btn-bypass" aria-label="Toggle effects bypass (B)">🔊 FX On</button>
+        </div>
+        <div class="level-meters ui-removed" role="group" aria-label="Audio level meters">
+          <div class="meter-channel">
+            <span class="meter-label">L:</span>
+            <div class="meter-track" role="meter" aria-label="Left channel level" aria-valuemin="-60" aria-valuemax="0">
+              <div class="meter-fill" id="meterLeft"></div>
+              <div class="meter-peak" id="peakLeft"></div>
+              <div class="clip-indicator" id="clipLeft" role="alert">CLIP</div>
+            </div>
+            <span class="meter-value" id="meterLeftValue">-∞ dB</span>
+          </div>
+          <div class="meter-channel">
+            <span class="meter-label">R:</span>
+            <div class="meter-track" role="meter" aria-label="Right channel level" aria-valuemin="-60" aria-valuemax="0">
+              <div class="meter-fill" id="meterRight"></div>
+              <div class="meter-peak" id="peakRight"></div>
+              <div class="clip-indicator" id="clipRight" role="alert">CLIP</div>
+            </div>
+            <span class="meter-value" id="meterRightValue">-∞ dB</span>
+          </div>
+          <div class="meter-channel meter-channel-rms">
+            <span class="meter-label">RMS:</span>
+            <div class="meter-track" role="meter" aria-label="Combined RMS level" aria-valuemin="-60" aria-valuemax="0">
+              <div class="meter-fill" id="meterRms"></div>
+            </div>
+            <span class="meter-value" id="meterRmsValue">-∞ dB</span>
+          </div>
+        </div>
+        <div class="spectrogram-container ui-removed">
+          <canvas id="spectrogramCanvas" aria-label="Frequency spectrogram visualization"></canvas>
+          <div class="spectrogram-labels" aria-hidden="true">
+            <span>20Hz</span>
+            <span>200Hz</span>
+            <span>2kHz</span>
+            <span>20kHz</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keyboard Shortcuts Help -->
+    <div class="shortcuts-hint ui-removed" aria-label="Keyboard shortcuts">
+      <span>Space: Play/Pause</span>
+      <span>B: Bypass</span>
+      <span>←→: Seek</span>
+      <span>Ctrl+Z/Y: Undo/Redo</span>
+      <span>Ctrl+E: Export</span>
+      <span>Ctrl+S: Save Preset</span>
+      <span>Ctrl+R: Reset Settings</span>
+    </div>
+
+    <!-- Batch Processing Panel (Tabbed) -->
+    <div class="batch-panel ui-removed" id="batchPanel" role="region" aria-label="Batch processing">
+      <div class="batch-header">
+        <div class="batch-tabs" role="tablist" aria-label="Batch panel tabs">
+          <button class="batch-tab active" id="tabQueue" role="tab" aria-selected="true" aria-controls="batchTabQueue">📦 Queue</button>
+          <button class="batch-tab" id="tabMeta" role="tab" aria-selected="false" aria-controls="batchTabMeta">🏷️ Metadata</button>
+          <button class="batch-tab" id="tabEdit" role="tab" aria-selected="false" aria-controls="batchTabEdit">✂️ Editor</button>
+        </div>
+        <div class="batch-actions">
+          <button id="batchAddFiles" class="btn-batch" aria-label="Add files to batch queue">+ Add Files</button>
+          <button id="batchClear" class="btn-batch btn-batch-secondary" aria-label="Clear batch queue" disabled>Clear</button>
+          <button id="batchExport" class="btn-batch btn-batch-export" aria-label="Export all files in batch queue" disabled>🚀 Export All</button>
+        </div>
+      </div>
+
+      <!-- Queue Tab -->
+      <div class="batch-tab-content" id="batchTabQueue" role="tabpanel" aria-labelledby="tabQueue">
+        <div class="batch-drop-zone" id="batchDropZone" role="region" aria-label="Drop audio files here for batch processing">
+          <span class="batch-drop-text">Drop multiple audio files here or click "Add Files"</span>
+        </div>
+        <div class="batch-options">
+          <label class="batch-option" data-tip="Text appended to each output filename, e.g. song_mastered.wav">
+            <span>Output suffix</span>
+            <input type="text" id="batchSuffix" value="_mastered" aria-label="Batch output filename suffix" autocomplete="off">
+          </label>
+          <label class="batch-option" data-tip="Keep the original filename and skip the suffix for exports.">
+            <span>Keep original name</span>
+            <input type="checkbox" id="batchKeepName" aria-label="Keep original filename when exporting">
+          </label>
+        </div>
+        <div class="batch-list" id="batchList" role="list" aria-label="Queued files"></div>
+        <div class="batch-progress hidden" id="batchProgress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="batch-progress-info">
+            <span id="batchProgressText">Processing 0/0...</span>
+            <span id="batchProgressPercent">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="batchProgressFill"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Metadata Tab -->
+      <div class="batch-tab-content hidden" id="batchTabMeta" role="tabpanel" aria-labelledby="tabMeta">
+        <div class="meta-layout">
+          <div class="meta-file-list" id="metaFileList" role="listbox" aria-label="Select file to edit metadata"></div>
+          <div class="meta-editor" id="metaEditor">
+            <div class="meta-empty" id="metaEmpty">
+              <span>Add files to the queue or load a file, then select one here to edit its metadata.</span>
+            </div>
+            <div class="meta-form hidden" id="metaForm">
+              <div class="meta-form-title" id="metaFormTitle">filename.wav</div>
+              <div class="meta-field">
+                <label for="metaTitle">Title</label>
+                <input type="text" id="metaTitle" placeholder="Track title" aria-label="Track title">
+              </div>
+              <div class="meta-field">
+                <label for="metaArtist">Artist</label>
+                <input type="text" id="metaArtist" placeholder="Artist name" aria-label="Artist name">
+              </div>
+              <div class="meta-field">
+                <label for="metaAlbum">Album</label>
+                <input type="text" id="metaAlbum" placeholder="Album name" aria-label="Album name">
+              </div>
+              <div class="meta-fields-row">
+                <div class="meta-field">
+                  <label for="metaGenre">Genre</label>
+                  <input type="text" id="metaGenre" placeholder="Genre" aria-label="Genre">
+                </div>
+                <div class="meta-field">
+                  <label for="metaYear">Year</label>
+                  <input type="text" id="metaYear" placeholder="2026" maxlength="4" aria-label="Year">
+                </div>
+                <div class="meta-field">
+                  <label for="metaTrack">Track #</label>
+                  <input type="text" id="metaTrack" placeholder="1" maxlength="4" aria-label="Track number">
+                </div>
+              </div>
+              <div class="meta-field">
+                <label for="metaComment">Comment</label>
+                <input type="text" id="metaComment" placeholder="Optional comment" aria-label="Comment">
+              </div>
+              <div class="meta-apply-row">
+                <button id="metaApplyAll" class="btn-batch" aria-label="Copy this metadata to all files in queue">Apply to All</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Editor Tab (mini DAW) -->
+      <div class="batch-tab-content hidden" id="batchTabEdit" role="tabpanel" aria-labelledby="tabEdit">
+        <div class="editor-empty" id="editorEmpty">
+          <span>Load an audio file to start editing. Drag on the waveform to select a region, then apply fades, trim, or cut.</span>
+        </div>
+        <div class="editor-workspace hidden" id="editorWorkspace">
+          <div class="editor-transport" role="group" aria-label="Editor playback controls">
+            <button id="edPlayBtn" class="ed-btn" aria-label="Play or pause">▶ Play</button>
+            <button id="edStopBtn" class="ed-btn" aria-label="Stop playback">■ Stop</button>
+            <button id="edLoopBtn" class="ed-btn" aria-label="Loop selection">🔁 Loop</button>
+            <span class="editor-sel-info" id="editorSelInfo">No selection — click and drag on the waveform</span>
+          </div>
+
+          <div class="editor-waveform-container" id="editorWaveContainer" role="group" aria-label="Editable waveform">
+            <canvas id="editorCanvas"></canvas>
+            <div class="editor-selection" id="editorSelection"></div>
+            <div class="editor-playhead" id="editorPlayhead"></div>
+          </div>
+
+          <div class="editor-tools">
+            <div class="editor-tool-group">
+              <h4>Fades</h4>
+              <div class="editor-fade-row">
+                <label for="fadeInDuration">Fade time</label>
+                <input type="range" id="fadeInDuration" min="0.1" max="10" step="0.1" value="2" aria-label="Fade duration in seconds">
+                <span id="fadeInDurationVal">2.0s</span>
+              </div>
+              <div class="editor-btn-row">
+                <button id="edFadeIn" class="ed-btn" data-tip="Fade in over the selection, or the start of the track if nothing is selected.">Fade In</button>
+                <button id="edFadeOut" class="ed-btn" data-tip="Fade out over the selection, or the end of the track if nothing is selected.">Fade Out</button>
+              </div>
+            </div>
+
+            <div class="editor-tool-group">
+              <h4>Edit</h4>
+              <div class="editor-btn-row">
+                <button id="edTrim" class="ed-btn" data-tip="Keep only the selected region, discard the rest.">Trim to Selection</button>
+                <button id="edCut" class="ed-btn" data-tip="Delete the selected region and join the remaining audio.">Delete Selection</button>
+                <button id="edSilence" class="ed-btn" data-tip="Silence the selected region.">Silence</button>
+              </div>
+            </div>
+
+            <div class="editor-tool-group">
+              <h4>Process</h4>
+              <div class="editor-btn-row">
+                <button id="edNormalize" class="ed-btn" data-tip="Peak-normalize the whole track to -0.3 dB.">Normalize</button>
+                <button id="edReverse" class="ed-btn" data-tip="Reverse the selection, or the whole track.">Reverse</button>
+              </div>
+            </div>
+
+            <div class="editor-tool-group">
+              <h4>History</h4>
+              <div class="editor-btn-row">
+                <button id="edUndo" class="ed-btn" data-tip="Undo the last edit.">↶ Undo Edit</button>
+                <button id="edReset" class="ed-btn ed-btn-danger" data-tip="Revert all edits back to the originally loaded audio.">Reset to Original</button>
+              </div>
+            </div>
+
+            <div class="editor-tool-group">
+              <h4>View</h4>
+              <div class="editor-fade-row" data-tip="Pixels per second. Scroll with the mouse wheel, zoom with Ctrl/Cmd + wheel.">
+                <label for="edZoom">Zoom</label>
+                <input type="range" id="edZoom" min="5" max="600" step="1" value="40" aria-label="Waveform zoom level">
+                <span id="edZoomVal">40 px/s</span>
+              </div>
+              <div class="editor-fade-row" data-tip="Scroll position in seconds.">
+                <label for="edPosition">Position</label>
+                <input type="range" id="edPosition" min="0" max="0" step="0.01" value="0" aria-label="Waveform scroll position">
+                <span id="edPositionVal">0:00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Row 1 -->
+    <div class="section-label temp-hidden-mastering">Mastering Controls</div>
+    <div class="panel-grid temp-hidden-mastering" role="group" aria-label="Audio processing settings">
+      <div class="settings-card">
+        <h3>Quick Fix</h3>
+        <label class="toggle-row" data-tip="Light compression to glue the mix together and add punch.">
+          <span>Glue Compression</span>
+          <input type="checkbox" id="glueCompression" aria-label="Enable glue compression">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-row" data-tip="Removes sub-bass rumble below 30Hz that wastes headroom.">
+          <span>Clean Low End</span>
+          <input type="checkbox" id="cleanLowEnd" checked aria-label="Enable low-end cleanup">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+      </div>
+
+      <div class="settings-card">
+        <h3>Stereo</h3>
+        <div class="slider-row" data-tip="Stereo width: 0% = mono, 100% = original, 200% = extra wide.">
+          <span>Width</span>
+          <input type="range" id="stereoWidth" min="0" max="200" step="1" value="100" aria-label="Stereo width">
+          <span class="slider-value" id="stereoWidthValue">100%</span>
+        </div>
+        <label class="toggle-row" data-tip="Makes bass frequencies mono for better club/speaker compatibility.">
+          <span>Mono Bass</span>
+          <input type="checkbox" id="centerBass" aria-label="Enable mono bass">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+      </div>
+
+      <div class="settings-card">
+        <h3>Polish</h3>
+        <label class="toggle-row" data-tip="Reduces muddy frequencies around 250Hz for clarity.">
+          <span>Cut Mud</span>
+          <input type="checkbox" id="cutMud" aria-label="Enable mud cut">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-row" data-tip="Sparkle and brightness: 12kHz high shelf boost plus a harmonic exciter (the harmonics are baked into the export).">
+          <span>Add Air</span>
+          <input type="checkbox" id="addAir" aria-label="Enable air boost">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-row" data-tip="Tames harsh frequencies around 4-6kHz.">
+          <span>Tame Harshness</span>
+          <input type="checkbox" id="tameHarsh" aria-label="Enable harshness reduction">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+      </div>
+
+      <div class="settings-card">
+        <h3>Sonic</h3>
+        <label class="toggle-row" data-tip="Dynamic harshness control: cuts 4kHz/6kHz only while those bands get loud. Export bakes the full dynamic version; the preview approximates it with static dips.">
+          <span>De-harsh</span>
+          <input type="checkbox" id="deHarsh" aria-label="Enable dynamic de-harsh">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-row" data-tip="3-band tape-style saturation (200Hz / 1.6kHz crossovers) for warmth and glue. Preview uses a broadband approximation.">
+          <span>Tape Warmth</span>
+          <input type="checkbox" id="tapeWarmth" aria-label="Enable tape warmth saturation">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-row" data-tip="Single-band transient shaper that boosts attacks for punch. Baked into the export.">
+          <span>Add Punch</span>
+          <input type="checkbox" id="addPunch" aria-label="Enable transient punch">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <div class="slider-row" data-tip="How much attack boost to add (0–100%).">
+          <span>Punch</span>
+          <input type="range" id="punchAmount" min="0" max="100" step="1" value="50" aria-label="Punch amount in percent">
+          <span class="slider-value" id="punchAmountValue">50%</span>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3>Output</h3>
+        <div class="select-row" data-tip="44.1kHz is CD quality and Spotify standard. 48kHz for video.">
+          <span>Sample Rate</span>
+          <select id="sampleRate" aria-label="Output sample rate">
+            <option value="44100">44.1 kHz</option>
+            <option value="48000">48 kHz</option>
+          </select>
+        </div>
+        <div class="select-row" data-tip="16-bit is CD quality. 24-bit has more dynamic range. 32-bit float preserves every sample exactly.">
+          <span>Bit Depth</span>
+          <select id="bitDepth" aria-label="Output bit depth">
+            <option value="16">16-bit</option>
+            <option value="24">24-bit</option>
+            <option value="32">32-bit Float</option>
+          </select>
+        </div>
+        <div class="select-row" data-tip="TPDF noise for transparency, shaped error-feedback for the deepest noise floor, or none for a bit-for-bit copy.">
+          <span>Dither</span>
+          <select id="ditherMode" aria-label="Dithering mode">
+            <option value="tpdf">TPDF</option>
+            <option value="shaped">Shaped</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-card preset-card">
+        <h3>Mastering Presets</h3>
+        <div class="preset-select-row">
+          <select id="presetSelect" aria-label="Mastering preset" title="Load a mastering preset"></select>
+          <button id="presetLoad" class="btn-preset" aria-label="Load selected preset">Load</button>
+          <button id="presetDelete" class="btn-preset" aria-label="Delete selected custom preset">🗑</button>
+        </div>
+        <div class="preset-save-row">
+          <input type="text" id="presetName" placeholder="Preset name…" aria-label="New preset name" autocomplete="off">
+          <button id="presetSave" class="btn-preset" aria-label="Save current settings as a preset">+ Save</button>
+        </div>
+        <div class="preset-btn-row">
+          <button id="presetExport" class="btn-preset" aria-label="Export presets to a JSON file">Export</button>
+          <button id="presetImport" class="btn-preset" aria-label="Import presets from a JSON file">Import</button>
+          <button id="presetReset" class="btn-preset" aria-label="Reset settings to defaults">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Row 2: Loudness & EQ -->
+    <div class="section-label temp-hidden-mastering">Loudness &amp; EQ</div>
+    <div class="panel-grid-2 temp-hidden-mastering">
+      <div class="settings-card loudness-card">
+        <h3>Loudness <span class="live-badge">LIVE</span></h3>
+        <div class="loudness-faders">
+          <div class="loudness-fader">
+            <span class="fader-label">INPUT</span>
+            <div class="fader-container">
+              <div class="fader-track">
+                <div class="fader-fill" id="inputFill"></div>
+              </div>
+              <input type="range" class="fader-slider" id="inputGain" min="-12" max="12" step="0.1" value="0" orient="vertical" data-tip="Adjust input level before processing. Double-click to reset to 0dB." aria-label="Input gain in decibels">
+            </div>
+            <span class="fader-value" id="inputGainValue">0.0 dB</span>
+          </div>
+          <div class="loudness-fader">
+            <span class="fader-label">CEILING</span>
+            <div class="fader-container">
+              <div class="fader-track ceiling-track">
+                <div class="fader-fill ceiling-fill" id="ceilingFill"></div>
+              </div>
+              <input type="range" class="fader-slider" id="truePeakCeiling" min="-6" max="0" step="0.1" value="-1" orient="vertical" data-tip="Maximum peak level. -1dB is standard for streaming." aria-label="True peak ceiling in decibels">
+            </div>
+            <span class="fader-value" id="ceilingValue">-1.0 dB</span>
+          </div>
+        </div>
+        <label class="toggle-row" data-tip="Adjusts overall volume to target LUFS.">
+          <span>Normalize Loudness</span>
+          <input type="checkbox" id="normalizeLoudness" checked aria-label="Enable loudness normalization">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <div class="slider-row" data-tip="Target loudness level. -14 LUFS for Spotify, -9 LUFS for louder masters.">
+          <span>Target</span>
+          <input type="range" id="targetLufs" min="-20" max="-6" step="1" value="-14" aria-label="Target loudness in LUFS">
+          <span class="slider-value" id="targetLufsValue">-14 LUFS</span>
+        </div>
+        <label class="toggle-row" data-tip="Prevents audio from clipping.">
+          <span>True Peak Limit</span>
+          <input type="checkbox" id="truePeakLimit" checked aria-label="Enable true peak limiting">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-row" data-tip="Soft-knee peak shaver between loudness normalization and the limiter — keeps loud masters punchy with less limiting pumping. Same curve in preview and export.">
+          <span>Soft Clip</span>
+          <input type="checkbox" id="softClip" checked aria-label="Enable soft clipper before the limiter">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-row" data-tip="Fair A/B: when FX is bypassed (B), the original is level-matched to the normalized loudness so you compare tone and balance, not volume.">
+          <span>Level Match A/B</span>
+          <input type="checkbox" id="levelMatch" checked aria-label="Level match when FX is bypassed">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+        <div class="lufs-live" data-tip="Momentary (400ms) and short-term (3s) loudness of the loaded track at the playhead — ITU-R BS.1770 K-weighted.">
+          <span class="lufs-live-item">M<b id="lufsMomentary">—</b></span>
+          <span class="lufs-live-item">S<b id="lufsShortTerm">—</b></span>
+          <span class="lufs-live-unit">LUFS</span>
+        </div>
+      </div>
+
+      <div class="settings-card eq-card">
+        <h3>EQ</h3>
+        <div class="eq-bands" role="group" aria-label="5-band equalizer">
+          <div class="eq-band">
+            <span class="band-freq-top">80HZ</span>
+            <div class="eq-slider-container">
+              <div class="eq-track">
+                <div class="eq-fill" id="eqLowFill"></div>
+              </div>
+              <input type="range" class="eq-slider" id="eqLow" min="-12" max="12" value="0" orient="vertical" aria-label="EQ 80Hz band gain">
+            </div>
+            <span class="band-value" id="eqLowVal">0 dB</span>
+          </div>
+          <div class="eq-band">
+            <span class="band-freq-top">250HZ</span>
+            <div class="eq-slider-container">
+              <div class="eq-track">
+                <div class="eq-fill" id="eqLowMidFill"></div>
+              </div>
+              <input type="range" class="eq-slider" id="eqLowMid" min="-12" max="12" value="0" orient="vertical" aria-label="EQ 250Hz band gain">
+            </div>
+            <span class="band-value" id="eqLowMidVal">0 dB</span>
+          </div>
+          <div class="eq-band">
+            <span class="band-freq-top">1KHZ</span>
+            <div class="eq-slider-container">
+              <div class="eq-track">
+                <div class="eq-fill" id="eqMidFill"></div>
+              </div>
+              <input type="range" class="eq-slider" id="eqMid" min="-12" max="12" value="0" orient="vertical" aria-label="EQ 1kHz band gain">
+            </div>
+            <span class="band-value" id="eqMidVal">0 dB</span>
+          </div>
+          <div class="eq-band">
+            <span class="band-freq-top">4KHZ</span>
+            <div class="eq-slider-container">
+              <div class="eq-track">
+                <div class="eq-fill" id="eqHighMidFill"></div>
+              </div>
+              <input type="range" class="eq-slider" id="eqHighMid" min="-12" max="12" value="0" orient="vertical" aria-label="EQ 4kHz band gain">
+            </div>
+            <span class="band-value" id="eqHighMidVal">0 dB</span>
+          </div>
+          <div class="eq-band">
+            <span class="band-freq-top">12KHZ</span>
+            <div class="eq-slider-container">
+              <div class="eq-track">
+                <div class="eq-fill" id="eqHighFill"></div>
+              </div>
+              <input type="range" class="eq-slider" id="eqHigh" min="-12" max="12" value="0" orient="vertical" aria-label="EQ 12kHz band gain">
+            </div>
+            <span class="band-value" id="eqHighVal">0 dB</span>
+          </div>
+        </div>
+        <div class="eq-presets" role="group" aria-label="EQ presets">
+          <button class="preset-btn active" data-preset="flat">Flat</button>
+          <button class="preset-btn" data-preset="vocal">Vocal Boost</button>
+          <button class="preset-btn" data-preset="bass">Bass Boost</button>
+          <button class="preset-btn" data-preset="bright">Bright</button>
+          <button class="preset-btn" data-preset="warm">Warm</button>
+          <button class="preset-btn" data-preset="suno">AI Fix</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="statusMessage" class="status-message" role="status" aria-live="polite"></div>
+
+    <!-- Suno Split-Studio — the one Suno tool that stays inline in the main
+         view. Upload/Download moved into header-icon popups (below);
+         Cue Split removed from view per request (kept in DOM, ui-removed). -->
+    <div id="sunoSplitPanel" class="suno-panel suno-split-panel">
+      <div class="suno-panel-row suno-split-title-row">
+        <span class="suno-panel-label" data-tip="Chia file MP3 thành nhiều part ngắn (mặc định 4 giây) rồi upload từng part lên Suno — part ngắn lọt qua kiểm tra fingerprint. Sau khi upload xong, app tự xếp các part theo đúng thứ tự lên timeline Suno Studio, mở Studio cho bạn duyệt rồi xuất nguyên bài MP3. Cần session Suno (mở ở icon ⚙️ trên header).">
+          <span aria-hidden="true">🎵</span> Suno Pro
+        </span>
+      </div>
+
+      <details class="suno-upload-tab" open>
+        <summary class="suno-upload-tab-summary">📤 Upload</summary>
+        <div class="suno-upload-tab-body">
+
+      <div class="suno-split-step">
+        <span class="step-tag">① Chuẩn bị</span>
+        <div class="suno-split-step-row suno-prep-actions-row">
+          <button id="sunoSplitLoad" class="suno-test-btn suno-import-btn" title="Chọn file MP3 cần chia nhỏ"><span aria-hidden="true">＋</span> Import</button>
+          <button id="openYoutubeBtn" class="suno-test-btn" type="button" title="Tải audio từ YouTube"><span aria-hidden="true">▶</span> Youtube</button>
+        </div>
+        <div class="suno-prep-file-row hidden" id="sunoPrepFileRow">
+          <div class="suno-prep-thumb" id="sunoPrepThumbWrap">
+            <img id="sunoPrepThumbImg" class="suno-prep-thumb-img hidden" alt="">
+            <span id="sunoPrepThumbIcon" class="suno-prep-thumb-icon" aria-hidden="true">🎵</span>
+          </div>
+          <span id="sunoSplitFile" class="suno-file-name">Chưa có file</span>
+          <span id="sunoSplitCount" class="suno-split-count"></span>
+        </div>
+        <label class="field-label-sm" for="sunoSplitSecs">Số frame</label>
+        <input type="number" id="sunoSplitSecs" class="suno-seconds-input suno-prep-secs-input" min="2" max="30" step="1" value="4" aria-label="Số giây mỗi part">
+        <button id="sunoSplitBtn" class="suno-test-btn suno-prep-cut-btn" title="Chia file thành các part MP3">Cắt đoạn</button>
+      </div>
+
+      <div class="suno-split-step">
+        <span class="step-tag">② Tải lên Suno</span>
+        <div class="suno-split-step-row">
+          <!-- Real buttons — kept functional, just not shown: #uploadToggleBtn
+               below proxies clicks to whichever of these is appropriate for
+               the current state (see the wiring script), so neither one's
+               own click handler/logic is touched. -->
+          <button id="sunoSplitUpload" class="suno-connect-btn ui-removed" title="Upload từng part lên Suno theo thứ tự">Upload parts</button>
+          <button id="sunoSplitStop" class="suno-test-btn suno-btn-ghost ui-removed" title="Dừng split/upload giữa chừng (part đang chạy sẽ xong nốt)">Stop</button>
+          <button id="uploadToggleBtn" class="suno-connect-btn suno-upload-toggle-btn" type="button" title="Upload từng part lên Suno theo thứ tự">Upload</button>
+        </div>
+      </div>
+
+      <div class="suno-split-step">
+        <span class="step-tag">③ Ghép &amp; xuất bài hoàn chỉnh</span>
+        <div class="suno-split-step-row">
+          <button id="sunoSplitAssemble" class="suno-connect-btn" title="Xếp các part đã upload lên timeline Suno Studio theo đúng thứ tự">Ghép Studio</button>
+          <button id="sunoSplitOpenFull" class="suno-test-btn" title="Mở project Studio đã ráp — nghe trọn vẹn bài hát (tài khoản free dùng được)">Mở full song</button>
+          <button id="sunoSplitInspect" class="suno-test-btn" title="Đọc lại project từ server Suno: mấy track, mấy clip, tên và vị trí từng clip">Kiểm tra project</button>
+          <button id="sunoSplitExport" class="suno-connect-btn suno-btn-final" title="Render nguyên bài từ arrangement Studio rồi lấy link MP3">🎉 Xuất full MP3</button>
+        </div>
+      </div>
+
+      <div class="suno-url-hint">Luồng: Import/Youtube → Cắt đoạn (4–7s/part) → Upload parts (cần session) → Ghép Studio → <b>Mở full song</b> (nghe trọn bài trong Studio) → <b>Xuất full MP3</b> (render file riêng để tải về). Tiến trình tự lưu — tắt app mở lại vẫn tiếp tục được.</div>
+      <div id="sunoSplitResume" class="suno-panel-row" hidden>
+        <span id="sunoSplitResumeText" class="suno-file-name"></span>
+        <button id="sunoSplitResumeGo" class="suno-test-btn">Tiếp tục phiên cũ</button>
+        <button id="sunoSplitResumeDrop" class="suno-test-btn">Bỏ</button>
+      </div>
+      <ol id="sunoSplitParts" class="suno-parts-list ui-removed"></ol>
+      <div id="sunoSplitStatus" class="suno-status" role="status" aria-live="polite"></div>
+
+        </div>
+      </details>
+    </div>
+
+    <div id="cueSplitPanel" class="suno-panel ui-removed">
+      <div class="suno-panel-row">
+        <span class="suno-panel-label" data-tip="Cắt 1 file MP3 dài thành nhiều bài theo timeline bạn gõ. Mỗi dòng: phút:giây + tên bài (dòng cuối tới hết file). File cắt ra lưu cùng thư mục với file gốc, tên theo timeline.">
+          <span aria-hidden="true">✂️</span> Split mp3
+        </span>
+        <button id="cueSplitLoad" class="suno-test-btn" title="Chọn nhiều file MP3 đưa vào danh sách">Load files…</button>
+        <button id="cueSplitGo" class="suno-connect-btn" title="Cắt track đang chọn theo timeline">Split theo timeline</button>
+      </div>
+      <div class="suno-panel-row">
+        <div id="cueSplitTracks" class="suno-track-list" role="listbox" aria-label="Danh sách file"></div>
+        <textarea id="cueSplitTimeline" class="suno-timeline-input" spellcheck="false" placeholder="00:00 Bài hát 1&#10;03:50 Bài hát 2&#10;09:46 Bài hát 3"></textarea>
+      </div>
+      <div class="suno-url-hint">Bấm chọn 1 track bên trái, gõ timeline bên phải (mỗi dòng <b>phút:giây tên bài</b>), bấm Split — file con lưu cùng thư mục file gốc.</div>
+      <div id="cueSplitStatus" class="suno-status" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- ── Suno Upload: moved from inline into a header-icon (⚙️) popup ──
+         Same #sunoPanel element, same children/ids — only its parent
+         changed, so every click handler the bundle already bound still
+         fires exactly as before. -->
+    <div id="sunoSettingsModal" class="cm-modal-overlay hidden">
+      <div class="cm-modal" role="dialog" aria-modal="true" aria-labelledby="sunoSettingsModalTitle">
+        <div class="cm-modal-header">
+          <span id="sunoSettingsModalTitle">⚙️ Suno Upload — Cấu hình &amp; đăng nhập</span>
+          <button id="closeSunoSettingsBtn" class="cm-modal-close" type="button" aria-label="Đóng">✕</button>
+        </div>
+        <div class="cm-modal-body">
+          <div id="sunoPanel" class="suno-panel">
+            <div class="suno-panel-row">
+              <select id="sunoBrowserSelect" class="suno-select" title="Chọn trình duyệt đang đăng nhập Suno (qua SSO)">
+                <option value="chrome">Chrome</option>
+                <option value="edge">Microsoft Edge</option>
+                <option value="brave">Brave</option>
+                <option value="coccoc">Cốc Cốc</option>
+                <option value="opera">Opera</option>
+                <option value="vivaldi">Vivaldi</option>
+                <option value="yandex">Yandex</option>
+                <option value="firefox">Firefox (fallback Copy as cURL)</option>
+                <option value="other">Khác...</option>
+              </select>
+              <select id="sunoProfileSelect" class="suno-select" title="Chọn profile trình duyệt đã đăng nhập Suno (máy nhiều profile thì chọn đúng cái hay dùng)">
+                <option value="">Profile: tự động</option>
+              </select>
+              <button id="sunoAutoFromBrowser" class="suno-connect-btn" title="Tự đọc cookie Suno (__client/__session) từ trình duyệt đã chọn — không cần đóng tab hay nhớ mật khẩu" data-tip="Tự lấy session: app sao chép cookie của profile sang một bản tạm, mở trình duyệt ở cửa sổ ẩn, đọc cookie __client/__session qua DevTools Protocol rồi tự đóng — không mất tab, không cần nhớ mật khẩu.">⚡ Tự lấy session từ trình duyệt này</button>
+              <input type="text" id="sunoSession" class="suno-session-input" placeholder="Hoặc dán thủ công: Copy as cURL / Cookie: __client=… / token eyJ…" autocomplete="off" spellcheck="false" aria-label="Suno session">
+              <button id="sunoTest" class="suno-test-btn" title="Kiểm tra session và xem hạn mức còn lại">Kiểm tra</button>
+              <label class="suno-auto-label">
+                <input type="checkbox" id="sunoAutoUpload" checked>
+                <span>Auto-upload sau khi master</span>
+              </label>
+              <span class="step-tag step-tag-alt">Cách khác (thủ công)</span>
+              <button id="sunoOpenLogin" class="suno-test-btn suno-btn-ghost" title="Mở trình duyệt đã chọn (đúng profile) lên trang Suno để bạn đăng nhập bằng tay, rồi bấm lại nút Tự lấy session">Mở trình duyệt login</button>
+              <button id="sunoConnect" class="suno-test-btn suno-btn-ghost" title="Mở cửa sổ đăng nhập suno.com trong app — SSO Google cũng hoạt động">Đăng nhập trong app</button>
+              <button id="sunoBrowser" class="suno-test-btn suno-btn-ghost" title="Mở suno.com trong trình duyệt bạn đang đăng nhập SSO; app tự nhận session khi bạn Copy as cURL">Mở bằng trình duyệt</button>
+            </div>
+            <div class="suno-url-hint">Lưu ý: Với Chromium (Chrome/Edge/Brave/Cốc Cốc/Opera/Vivaldi/Yandex), app sẽ <b>đóng tạm thời</b> trình duyệt bạn chọn, mở lại bằng <i>remote debugging</i> để đọc cookie trực tiếp, rồi đóng lại. Với Firefox dùng fallback <b>Copy as cURL</b>.</div>
+            <div id="sunoStatus" class="suno-status" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Suno Download: moved from inline into a header-icon (⬇️) popup ── -->
+    <div id="sunoDownloadModal" class="cm-modal-overlay hidden">
+      <div class="cm-modal" role="dialog" aria-modal="true" aria-labelledby="sunoDownloadModalTitle">
+        <div class="cm-modal-header">
+          <span id="sunoDownloadModalTitle">⬇️ Suno Download</span>
+          <button id="closeSunoDownloadBtn" class="cm-modal-close" type="button" aria-label="Đóng">✕</button>
+        </div>
+        <div class="cm-modal-body">
+          <div id="sunoDlPanel" class="suno-panel">
+            <div class="suno-panel-row">
+              <input type="text" id="sunoDlLink" class="suno-session-input" placeholder="Dán link Suno: https://suno.com/s/… " autocomplete="off" spellcheck="false" aria-label="Suno song link">
+              <button id="sunoDlBtn" class="suno-connect-btn" title="Tải bài nhạc từ link Suno về file WAV">Download WAV</button>
+            </div>
+            <div class="suno-url-hint">Cần session Suno (lấy ở ⚙️ Suno Upload). Tên file tự điền theo tên bài — bạn chỉ cần chọn thư mục lưu. Bài private/đã xóa hoặc ngoài quyền download của gói sẽ báo lỗi.</div>
+            <div id="sunoDlStatus" class="suno-status" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Auto-prompt after a successful "Cắt đoạn" — asks whether to
+         upload now. "Có" just programmatically clicks the real
+         #sunoSplitUpload button (via #uploadToggleBtn's own click wiring),
+         it never reimplements the upload itself. -->
+    <div id="uploadConfirmModal" class="cm-modal-overlay hidden">
+      <div class="cm-modal" style="width:360px;" role="dialog" aria-modal="true" aria-labelledby="uploadConfirmTitle">
+        <div class="cm-modal-header">
+          <span id="uploadConfirmTitle">✅ Đã cắt đoạn xong</span>
+        </div>
+        <div class="cm-modal-body" style="text-align:center;">
+          <p id="uploadConfirmMsg" class="suno-status" style="margin:0 0 14px;"></p>
+          <div class="suno-split-step-row" style="gap:8px;">
+            <button id="uploadConfirmYesBtn" class="suno-connect-btn" type="button" style="flex:1;">Có, upload luôn</button>
+            <button id="uploadConfirmNoBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;">Không</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── YouTube download — ported from the reference "Suno Pro" desktop
+         project (TOOL SUNO Extension/desktop). Paste a link, resolve its
+         info, download audio; the result is fed into the existing Suno
+         Split-Studio "Import" pipeline exactly like a user-picked file
+         (see importFileAsIfPicked below) — the Suno upload/split logic
+         itself is never touched. -->
+    <div id="youtubeModal" class="cm-modal-overlay hidden">
+      <div class="cm-modal" role="dialog" aria-modal="true" aria-labelledby="youtubeModalTitle">
+        <div class="cm-modal-header">
+          <span id="youtubeModalTitle">▶ Tải audio từ YouTube</span>
+          <button id="closeYoutubeModalBtn" class="cm-modal-close" type="button" aria-label="Đóng">✕</button>
+        </div>
+        <div class="cm-modal-body">
+          <div class="suno-panel">
+            <div class="suno-panel-row">
+              <input type="text" id="ytLinkInput" class="suno-session-input" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" spellcheck="false" aria-label="YouTube link">
+              <button id="ytResolveBtn" class="suno-test-btn" type="button">Xem thông tin</button>
+            </div>
+            <div id="ytInfoBox" class="suno-yt-info hidden">
+              <img id="ytThumbPreview" class="suno-yt-thumb" alt="">
+              <div class="suno-yt-info-text">
+                <b id="ytTitlePreview"></b>
+                <span id="ytAuthorPreview" class="suno-status"></span>
+              </div>
+            </div>
+            <div class="suno-panel-row">
+              <button id="ytDownloadBtn" class="suno-connect-btn" type="button" disabled>Tải về</button>
+              <button id="ytCancelBtn" class="suno-test-btn suno-btn-ghost" type="button" disabled>Hủy</button>
+            </div>
+            <div id="ytStage" class="suno-status hidden"></div>
+            <div class="suno-yt-bar"><i id="ytProgressBar"></i></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Blocking overlay while Split-Studio uploads parts to Suno ──
+         Shown on #sunoSplitUpload click (extra listener, doesn't replace
+         the app's own handler); the single log line below the spinner
+         just mirrors #sunoSplitStatus's own text live (read-only observer,
+         no app logic touched); hidden again once #sunoSplitUpload is
+         re-enabled, which is exactly when the app's own click handler's
+         `finally` block runs (upload finished, stopped, or errored out). -->
+    <div id="splitUploadOverlay" class="cm-blocker-overlay hidden">
+      <div class="cm-blocker-box">
+        <div class="cm-spinner" aria-hidden="true"></div>
+        <div class="cm-blocker-title">Đang tải lên Suno…</div>
+        <div id="splitUploadOverlayLog" class="cm-blocker-log suno-status">Đang chuẩn bị…</div>
+      </div>
+    </div>
+
+    <div class="progress-container hidden" id="progressContainer" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <span id="progressText">0%</span>
+    </div>
+  </main>
+
+  <button id="debugBtn" class="btn-debug ui-removed" aria-label="Show debug information">🔧</button>
+
+  <!-- Tooltip element -->
+  <div id="tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
+
+  <!-- TEMP: force dark theme regardless of OS preference, to match the
+       "Suno Pro" reference app's design (purely a presentation attribute
+       the app's own canvas-paint code also reads; does not touch any app
+       state/logic). Runs after the module bundle has finished its own
+       theme auto-detect, so it wins. Revert by removing this block. -->
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    });
+  </script>
+
+  <!-- TEMP: header-icon popups + upload-blocking overlay. Purely additive
+       UI wiring — every id the app's own bundle already binds to keeps
+       its listeners (elements are only reparented, never removed/recreated).
+       This script only shows/hides new wrapper elements and mirrors
+       existing status text; it never calls any Suno/export/mastering
+       logic itself. Revert by deleting this block. -->
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      function openModal(overlay) { if (overlay) overlay.classList.remove('hidden'); }
+      function closeModal(overlay) { if (overlay) overlay.classList.add('hidden'); }
+
+      var settingsModal = document.getElementById('sunoSettingsModal');
+      var downloadModal = document.getElementById('sunoDownloadModal');
+
+      var openSettingsBtn = document.getElementById('openSunoSettingsBtn');
+      var openDownloadBtn = document.getElementById('openSunoDownloadBtn');
+      var closeSettingsBtn = document.getElementById('closeSunoSettingsBtn');
+      var closeDownloadBtn = document.getElementById('closeSunoDownloadBtn');
+
+      if (openSettingsBtn) openSettingsBtn.addEventListener('click', function () { openModal(settingsModal); });
+      if (openDownloadBtn) openDownloadBtn.addEventListener('click', function () { openModal(downloadModal); });
+      if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', function () { closeModal(settingsModal); });
+      if (closeDownloadBtn) closeDownloadBtn.addEventListener('click', function () { closeModal(downloadModal); });
+
+      // Click on the dimmed backdrop (not the dialog itself) also closes.
+      [settingsModal, downloadModal].forEach(function (overlay) {
+        if (!overlay) return;
+        overlay.addEventListener('mousedown', function (ev) {
+          if (ev.target === overlay) closeModal(overlay);
+        });
+      });
+
+      // Esc closes whichever modal is open.
+      window.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Escape') return;
+        if (settingsModal && !settingsModal.classList.contains('hidden')) closeModal(settingsModal);
+        if (downloadModal && !downloadModal.classList.contains('hidden')) closeModal(downloadModal);
+      });
+
+      // ── Split-Studio: live split-part count badge ──────────────────
+      var partsList = document.getElementById('sunoSplitParts');
+      var splitCountEl = document.getElementById('sunoSplitCount');
+      if (partsList && splitCountEl) {
+        var updateCount = function () {
+          var n = partsList.children.length;
+          splitCountEl.textContent = n ? (n + ' part' + (n > 1 ? 's' : '')) : '';
+        };
+        new MutationObserver(updateCount).observe(partsList, { childList: true });
+        updateCount();
+      }
+
+      // ── Split-Studio: blocking overlay while "Upload parts" runs ────
+      // Polling instead of MutationObserver: simpler to reason about and
+      // immune to any event-listener-ordering edge cases — every 150ms
+      // while open, just copy whatever #sunoSplitStatus currently shows
+      // (read-only, never sets app state) into the overlay's log line.
+      var uploadBtn = document.getElementById('sunoSplitUpload');
+      var splitStatus = document.getElementById('sunoSplitStatus');
+      var blocker = document.getElementById('splitUploadOverlay');
+      var blockerLog = document.getElementById('splitUploadOverlayLog');
+      var pollTimer = null;
+      var sawDisabled = false;
+      var startedAt = 0;
+
+      function mirrorStatus() {
+        if (!splitStatus) return;
+        blockerLog.innerHTML = splitStatus.innerHTML;
+        blockerLog.className = 'cm-blocker-log ' + splitStatus.className;
+      }
+      function finishUpload(delayMs) {
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        setTimeout(function () { blocker.classList.add('hidden'); }, delayMs);
+      }
+      function syncUploadToggleBtn() {
+        if (!uploadToggleBtn) return;
+        if (uploadBtn.disabled) {
+          uploadToggleBtn.classList.add('is-uploading');
+          uploadToggleBtn.textContent = 'Stop';
+        } else {
+          uploadToggleBtn.classList.remove('is-uploading');
+          uploadToggleBtn.textContent = 'Upload';
+        }
+      }
+      function pollTick() {
+        mirrorStatus();
+        syncUploadToggleBtn();
+        if (uploadBtn.disabled) {
+          sawDisabled = true;
+          return;
+        }
+        if (sawDisabled) {
+          // Was actually running (button was disabled mid-upload) and is
+          // now done — this is the real "upload finished" signal from
+          // the app's own `finally` block re-enabling the button.
+          finishUpload(0);
+        } else if (Date.now() - startedAt > 1500) {
+          // Button never got disabled at all within a reasonable window
+          // — an early-return failure (no parts split yet / no session),
+          // so there is nothing to actually wait for. Let the user read
+          // the mirrored error a moment longer, then close.
+          finishUpload(800);
+        }
+      }
+
+      // ── Single Upload/Stop toggle button — a visible stand-in for the
+      // real #sunoSplitUpload / #sunoSplitStop pair (hidden via
+      // .ui-removed but still the ones actually doing the work): this
+      // button only ever proxies a click to whichever real button is
+      // right for the current state, it never reimplements upload/stop.
+      var uploadToggleBtn = document.getElementById('uploadToggleBtn');
+      var stopBtnReal = document.getElementById('sunoSplitStop');
+      if (uploadToggleBtn && uploadBtn && stopBtnReal) {
+        uploadToggleBtn.addEventListener('click', function () {
+          if (uploadBtn.disabled) stopBtnReal.click();
+          else uploadBtn.click();
+        });
+      }
+
+      if (uploadBtn && blocker && blockerLog) {
+        uploadBtn.addEventListener('click', function () {
+          sawDisabled = false;
+          startedAt = Date.now();
+          blockerLog.textContent = 'Đang chuẩn bị…';
+          blockerLog.className = 'cm-blocker-log suno-status';
+          blocker.classList.remove('hidden');
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = setInterval(pollTick, 150);
+        });
+      }
+
+      // ── Auto-prompt after a successful "Cắt đoạn" ───────────────────
+      // Arms on click, then looks at the FIRST status update that follows
+      // (the split handler's one synchronous completion message) — "ok"
+      // class means it actually finished (vs. an early "chưa có file"
+      // error), only then is the popup worth showing.
+      var cutBtn = document.getElementById('sunoSplitBtn');
+      var uploadConfirmModal = document.getElementById('uploadConfirmModal');
+      var uploadConfirmMsg = document.getElementById('uploadConfirmMsg');
+      var uploadConfirmYesBtn = document.getElementById('uploadConfirmYesBtn');
+      var uploadConfirmNoBtn = document.getElementById('uploadConfirmNoBtn');
+      var waitingForCutResult = false;
+
+      if (cutBtn) {
+        cutBtn.addEventListener('click', function () {
+          waitingForCutResult = true;
+        });
+      }
+      if (splitStatus && uploadConfirmModal) {
+        new MutationObserver(function () {
+          if (!waitingForCutResult) return;
+          waitingForCutResult = false;
+          if (/\bok\b/.test(splitStatus.className)) {
+            if (uploadConfirmMsg) uploadConfirmMsg.textContent = 'Đã cắt đoạn xong. Bạn có muốn upload lên Suno không?';
+            uploadConfirmModal.classList.remove('hidden');
+          }
+        }).observe(splitStatus, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      }
+      if (uploadConfirmYesBtn && uploadToggleBtn) {
+        uploadConfirmYesBtn.addEventListener('click', function () {
+          uploadConfirmModal.classList.add('hidden');
+          uploadToggleBtn.click(); // idle at this point, so this starts the real upload
+        });
+      }
+      if (uploadConfirmNoBtn) {
+        uploadConfirmNoBtn.addEventListener('click', function () {
+          uploadConfirmModal.classList.add('hidden');
+        });
+      }
+      if (uploadConfirmModal) {
+        uploadConfirmModal.addEventListener('mousedown', function (ev) {
+          if (ev.target === uploadConfirmModal) uploadConfirmModal.classList.add('hidden');
+        });
+      }
+
+      // ── Window height follows this page's actual content ────────────
+      // Read-only measurement sent to the main process via a new,
+      // additive IPC call — never touches any existing window-control or
+      // app logic. Modals/overlays are position:fixed and don't affect
+      // this measurement, so opening one never resizes the window.
+      //
+      // main-content is `flex:1` inside a 100vh column, so while the
+      // window is taller than the content needs, main-content's own box
+      // (and therefore its scrollHeight, which is max(content, own box))
+      // just reports back whatever size it was already given — content
+      // shorter than the window never shrinks it. To read the TRUE
+      // natural content height we briefly let main-content size itself
+      // to its content (flex:none + height:auto), measure, then restore
+      // — synchronous, so nothing paints in between and there's no flicker.
+      var topBarEl = document.querySelector('.top-bar');
+      var mainContentEl = document.querySelector('.main-content');
+      var resizeDebounce = null;
+      function measureAndResizeWindow() {
+        if (!topBarEl || !mainContentEl) return;
+        if (!window.electronAPI || typeof window.electronAPI.resizeWindowToContent !== 'function') return;
+        var prevFlex = mainContentEl.style.flex;
+        var prevHeight = mainContentEl.style.height;
+        mainContentEl.style.flex = '0 0 auto';
+        mainContentEl.style.height = 'auto';
+        var contentHeight = mainContentEl.scrollHeight;
+        mainContentEl.style.flex = prevFlex;
+        mainContentEl.style.height = prevHeight;
+        var h = topBarEl.offsetHeight + contentHeight;
+        window.electronAPI.resizeWindowToContent(h);
+      }
+      function scheduleResize() {
+        if (resizeDebounce) clearTimeout(resizeDebounce);
+        resizeDebounce = setTimeout(measureAndResizeWindow, 120);
+      }
+      if (mainContentEl) {
+        new MutationObserver(scheduleResize).observe(mainContentEl, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class', 'hidden', 'style']
+        });
+      }
+      scheduleResize();
+
+      // ── "Import": feed any local audio file into the existing Suno
+      // Split-Studio load pipeline exactly as if the user had picked it
+      // via the file dialog — never reimplements that logic, just drives
+      // the real #sunoSplitLoad button through it. window.electronAPI is
+      // a plain object from contextBridge, so overriding one method on it
+      // for a single call (then restoring it) safely intercepts only the
+      // next dialog call, without touching the app's own code. ──────────
+      var importBtn = document.getElementById('sunoSplitLoad');
+      var prepThumbImg = document.getElementById('sunoPrepThumbImg');
+      var prepThumbIcon = document.getElementById('sunoPrepThumbIcon');
+      var syntheticImportInProgress = false;
+
+      function showGenericThumb() {
+        if (!prepThumbImg || !prepThumbIcon) return;
+        prepThumbImg.classList.add('hidden');
+        prepThumbImg.src = '';
+        prepThumbIcon.classList.remove('hidden');
+      }
+      function showRealThumb(url) {
+        if (!prepThumbImg || !prepThumbIcon || !url) return;
+        prepThumbImg.src = url;
+        prepThumbImg.classList.remove('hidden');
+        prepThumbIcon.classList.add('hidden');
+      }
+      if (importBtn) {
+        importBtn.addEventListener('click', function () {
+          // A real, manual Import click (not our own synthetic one from
+          // the YouTube flow below) never has a thumbnail — reset to the
+          // generic music-note placeholder.
+          if (!syntheticImportInProgress) showGenericThumb();
+        });
+      }
+      function importFileAsIfPicked(filePath) {
+        // window.electronAPI is frozen by contextBridge, so it can't be
+        // monkey-patched from here — primeNextFileDialog() hands the path
+        // to preload.js (via a shared DOM attribute) instead, which the
+        // real selectFile() picks up on its very next call, consuming it.
+        if (!importBtn || !window.electronAPI || typeof window.electronAPI.primeNextFileDialog !== 'function') return;
+        window.electronAPI.primeNextFileDialog(filePath);
+        syntheticImportInProgress = true;
+        importBtn.click();
+        setTimeout(function () { syntheticImportInProgress = false; }, 0);
+      }
+
+      // The thumbnail + filename row only makes sense once there's
+      // actually a file/video loaded — stays hidden until #sunoSplitFile's
+      // own text (set by the app's existing load logic) moves off its
+      // default placeholder. Read-only observer, never sets app state.
+      var prepFileRow = document.getElementById('sunoPrepFileRow');
+      var splitFileEl = document.getElementById('sunoSplitFile');
+      if (prepFileRow && splitFileEl) {
+        var updatePrepFileRowVisibility = function () {
+          var text = (splitFileEl.textContent || '').trim();
+          if (text && text !== 'Chưa có file') {
+            prepFileRow.classList.remove('hidden');
+          } else {
+            prepFileRow.classList.add('hidden');
+          }
+        };
+        new MutationObserver(updatePrepFileRowVisibility).observe(splitFileEl, { childList: true, characterData: true, subtree: true });
+        updatePrepFileRowVisibility();
+      }
+
+      // ── YouTube modal — ported flow from the reference "Suno Pro"
+      // desktop app (resolve link → show thumbnail/title/author → download
+      // with a progress bar → feed the downloaded file into Import above).
+      var youtubeModal = document.getElementById('youtubeModal');
+      var openYoutubeBtn = document.getElementById('openYoutubeBtn');
+      var closeYoutubeModalBtn = document.getElementById('closeYoutubeModalBtn');
+      var ytLinkInput = document.getElementById('ytLinkInput');
+      var ytResolveBtn = document.getElementById('ytResolveBtn');
+      var ytInfoBox = document.getElementById('ytInfoBox');
+      var ytThumbPreview = document.getElementById('ytThumbPreview');
+      var ytTitlePreview = document.getElementById('ytTitlePreview');
+      var ytAuthorPreview = document.getElementById('ytAuthorPreview');
+      var ytDownloadBtn = document.getElementById('ytDownloadBtn');
+      var ytCancelBtn = document.getElementById('ytCancelBtn');
+      var ytStage = document.getElementById('ytStage');
+      var ytProgressBar = document.getElementById('ytProgressBar');
+      var ytCurrentInfo = null;
+
+      if (youtubeModal && openYoutubeBtn) {
+        openYoutubeBtn.addEventListener('click', function () { youtubeModal.classList.remove('hidden'); });
+        if (closeYoutubeModalBtn) closeYoutubeModalBtn.addEventListener('click', function () { youtubeModal.classList.add('hidden'); });
+        youtubeModal.addEventListener('mousedown', function (ev) {
+          if (ev.target === youtubeModal) youtubeModal.classList.add('hidden');
+        });
+
+        if (ytResolveBtn) {
+          ytResolveBtn.addEventListener('click', function () {
+            var link = (ytLinkInput.value || '').trim();
+            if (!link || !window.electronAPI || typeof window.electronAPI.youtubeResolve !== 'function') return;
+            window.electronAPI.youtubeResolve(link).then(function (info) {
+              ytCurrentInfo = info;
+              ytTitlePreview.textContent = info.title || '';
+              ytAuthorPreview.textContent = info.author || '';
+              ytThumbPreview.src = info.thumbnailUrl || '';
+              ytInfoBox.classList.remove('hidden');
+              ytDownloadBtn.disabled = false;
+            }).catch(function (e) {
+              ytCurrentInfo = null;
+              ytInfoBox.classList.add('hidden');
+              ytDownloadBtn.disabled = true;
+              ytStage.classList.remove('hidden');
+              ytStage.textContent = 'Lỗi: ' + (e && e.message ? e.message : e);
+            });
+          });
+        }
+
+        if (window.electronAPI && typeof window.electronAPI.onYoutubeDownloadProgress === 'function') {
+          window.electronAPI.onYoutubeDownloadProgress(function (payload) {
+            var mb = (payload.receivedBytes / 1024 / 1024).toFixed(1);
+            ytProgressBar.style.width = '100%';
+            ytStage.classList.remove('hidden');
+            ytStage.textContent = 'Đang tải YouTube… ' + mb + ' MB';
+          });
+        }
+
+        if (ytDownloadBtn) {
+          ytDownloadBtn.addEventListener('click', function () {
+            if (!ytCurrentInfo || !window.electronAPI || typeof window.electronAPI.youtubeDownload !== 'function') return;
+            ytDownloadBtn.disabled = true;
+            ytCancelBtn.disabled = false;
+            ytProgressBar.style.width = '5%';
+            ytStage.classList.remove('hidden');
+            ytStage.textContent = 'Đang tải "' + ytCurrentInfo.title + '"…';
+            window.electronAPI.youtubeDownload({ link: ytLinkInput.value.trim() }).then(function (result) {
+              ytStage.textContent = 'Tải xong "' + ytCurrentInfo.title + '".';
+              ytProgressBar.style.width = '0%';
+              showRealThumb(ytCurrentInfo.thumbnailUrl);
+              var fileNameEl = document.getElementById('sunoSplitFile');
+              if (fileNameEl) fileNameEl.textContent = ytCurrentInfo.title;
+              importFileAsIfPicked(result.path);
+              youtubeModal.classList.add('hidden');
+            }).catch(function (e) {
+              ytStage.textContent = 'Lỗi: ' + (e && e.message ? e.message : e);
+              ytProgressBar.style.width = '0%';
+            }).finally(function () {
+              ytDownloadBtn.disabled = false;
+              ytCancelBtn.disabled = true;
+            });
+          });
+        }
+
+        if (ytCancelBtn) {
+          ytCancelBtn.addEventListener('click', function () {
+            if (window.electronAPI && typeof window.electronAPI.youtubeCancel === 'function') {
+              window.electronAPI.youtubeCancel();
+            }
+          });
+        }
+      }
+    });
+  </script>
+
+</body>
+</html>
