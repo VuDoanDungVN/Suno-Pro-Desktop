@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveFile: () => ipcRenderer.invoke('save-file'),
   saveMp3: () => ipcRenderer.invoke('save-mp3'),
   debugLog: (line) => ipcRenderer.invoke('debug-log', line).catch(() => undefined),
+  debugLogRead: (opts) => ipcRenderer.invoke('debug-log-read', opts),
+  debugLogClear: () => ipcRenderer.invoke('debug-log-clear'),
+  debugLogOpenFolder: () => ipcRenderer.invoke('debug-log-open-folder'),
   saveJson: () => ipcRenderer.invoke('save-json'),
   openJson: () => ipcRenderer.invoke('open-json'),
   fileExists: (filePath) => ipcRenderer.invoke('file-exists', filePath),
@@ -38,12 +41,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPathForFile: (file) => webUtils.getPathForFile(file),
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
 
-  // License activation
+  // License activation (chữ ký offline cũ — giữ nguyên, không đụng tới)
   getMacAddress: () => ipcRenderer.invoke('get-mac-address'),
   activationLoad: () => ipcRenderer.invoke('activation-load'),
   activationSave: (payload) => ipcRenderer.invoke('activation-save', payload),
   trialStatus: () => ipcRenderer.invoke('trial-status'),
   trialStart: () => ipcRenderer.invoke('trial-start'),
+
+  // Suno Pro Worker license — lớp gate mới, độc lập với activation offline ở
+  // trên: các thao tác gọi Suno (upload/ghép/export/dọn dẹp) đòi hỏi 1 trong
+  // các API này đã kích hoạt thành công trước đó.
+  sunoProLicenseStatus: () => ipcRenderer.invoke('sunopro-license-status'),
+  sunoProLicenseInfo: () => ipcRenderer.invoke('sunopro-license-info'),
+  sunoProLicenseActivate: (payload) => ipcRenderer.invoke('sunopro-license-activate', payload),
+  sunoProLicenseLogout: () => ipcRenderer.invoke('sunopro-license-logout'),
 
   // Suno upload (user's own session: cookie header / __session / eyJ token)
   sunoSessionLoad: () => ipcRenderer.invoke('suno-session-load'),
@@ -90,7 +101,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
+  appQuit: () => ipcRenderer.invoke('app-quit'),
   resizeWindowToContent: (height) => ipcRenderer.invoke('window-resize-to-content', height),
+
+  // Clean up "_part" clips after a successful export — trash (reversible)
+  // runs automatically; permanent delete is a separate, explicit call.
+  sunoCleanupParts: (payload) => ipcRenderer.invoke('suno-cleanup-parts', payload),
+  sunoPermanentDelete: (payload) => ipcRenderer.invoke('suno-permanent-delete', payload),
+
+  // Albums — organizing/naming container shown on launch (see Albums gate).
+  albumsList: () => ipcRenderer.invoke('albums-list'),
+  albumsCreate: (payload) => ipcRenderer.invoke('albums-create', payload),
+  albumsUpdate: (payload) => ipcRenderer.invoke('albums-update', payload),
+  albumsDelete: (payload) => ipcRenderer.invoke('albums-delete', payload),
+
+  // Songs — one record per completed song; always has an albumId, except
+  // when that album was later deleted (then it's null = "Chưa phân loại").
+  songsAdd: (payload) => ipcRenderer.invoke('songs-add', payload),
+  songsList: (payload) => ipcRenderer.invoke('songs-list', payload),
+  songsUpdate: (payload) => ipcRenderer.invoke('songs-update', payload),
+  songsDelete: (payload) => ipcRenderer.invoke('songs-delete', payload),
+
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  sunoTrashClip: (payload) => ipcRenderer.invoke('suno-trash-clip', payload),
+
+  sunoGenerate: (payload) => ipcRenderer.invoke('suno-generate', payload),
+  sunoModelsList: () => ipcRenderer.invoke('suno-models-list'),
+  genStylePresetsList: () => ipcRenderer.invoke('gen-style-presets-list'),
+  genStylePresetsAdd: (payload) => ipcRenderer.invoke('gen-style-presets-add', payload),
+  genStylePresetsRemove: (payload) => ipcRenderer.invoke('gen-style-presets-remove', payload),
+  sunoMySongs: (payload) => ipcRenderer.invoke('suno-my-songs', payload),
+  onSunoGenerateProgress: (callback) => {
+    const listener = (_event, msg) => callback(msg);
+    ipcRenderer.on('suno-generate-progress', listener);
+    return () => ipcRenderer.removeListener('suno-generate-progress', listener);
+  },
+
+  prepareImportTitle: (payload) => ipcRenderer.invoke('prepare-import-title', payload),
 
   // YouTube download (feeds the result into the existing Suno Split-Studio
   // import pipeline — see dist/index.html's importFileAsIfPicked)

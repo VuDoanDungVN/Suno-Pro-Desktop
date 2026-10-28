@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "suno-pro-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-24",
+  "observability": { "enabled": true },
+  // Tạo bằng: wrangler d1 create suno-pro-db  (rồi dán database_id thật vào đây)
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "suno-pro-db",
+      "database_id": "d04a65e1-c40a-44a1-8495-99528b9f57b7",
+      "migrations_dir": "./migrations"
+    }
+  ]
+}

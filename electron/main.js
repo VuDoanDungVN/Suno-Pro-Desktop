@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, session, shell, clipboard, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, shell, clipboard, Notification, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const net = require('net');
+const crypto = require('crypto');
 const { exec, execSync, spawn } = require('child_process');
 
 let mainWindow;
@@ -54,6 +55,23 @@ function createWindow() {
   
   if (!app.isPackaged) {
     mainWindow.webContents.openDevTools();
+  } else {
+    // Khoá "sunopro-locked" ở index.html chỉ là 1 class CSS do renderer tự
+    // bật/tắt — mở được DevTools là gỡ khoá đó bằng 1 dòng lệnh console,
+    // không cần Key thật (tuy không chạm được các tính năng có kiểm tra Key
+    // thật ở main.js/Worker, nhưng vẫn không nên để mở DevTools dễ dàng ở
+    // bản phát hành). Chặn phím tắt + tự đóng nếu lỡ mở được bằng cách khác.
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      const key = String(input.key || '').toLowerCase();
+      const isDevToolsShortcut =
+        key === 'f12' ||
+        (input.control && input.shift && (key === 'i' || key === 'j' || key === 'c')) ||
+        (input.meta && input.alt && (key === 'i' || key === 'j' || key === 'c'));
+      if (isDevToolsShortcut) event.preventDefault();
+    });
+    mainWindow.webContents.on('devtools-opened', () => {
+      mainWindow.webContents.closeDevTools();
+    });
   }
 }
 
@@ -63,6 +81,11 @@ ipcMain.handle('window-maximize', () => {
   mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
 });
 ipcMain.handle('window-close', () => mainWindow.close());
+
+// Nút "✕" ở góc cửa sổ chỉ ĐÓNG CỬA SỔ (trên macOS, app vẫn chạy ngầm trong
+// Dock như hành vi chuẩn của hệ điều hành — window-all-closed không quit()
+// trên darwin, xem bên dưới). Đây mới là cách TẮT HẲN app đúng nghĩa.
+ipcMain.handle('app-quit', () => app.quit());
 
 // Let the renderer ask the window to match its own content height (the
 // page's natural scrollHeight), so the window never carries empty space
@@ -363,7 +386,10 @@ function trialReadRegistry() {
     try {
       const q = (key) => {
         try {
-          return execSync(`defaults read "${TRIAL_MAC_DOMAIN}" ${key}`, { timeout: 5000 }).toString().trim();
+          // 2>/dev/null: domain chưa tồn tại (chưa từng dùng trial) là tình
+          // huống BÌNH THƯỜNG, đã được try/catch xử lý đúng bên dưới — chỉ
+          // chặn `defaults` tự in cảnh báo đó ra terminal, không che lỗi thật.
+          return execSync(`defaults read "${TRIAL_MAC_DOMAIN}" ${key} 2>/dev/null`, { timeout: 5000 }).toString().trim();
         } catch (e) {
           return '';
         }
@@ -510,6 +536,148 @@ ipcMain.handle('trial-start', () => {
 // (contains __client/__session). When __client is present we mint a fresh
 // short-lived JWT through Clerk; otherwise __session is itself a valid token.
 
+// ─── Suno Pro Worker — license + proxy gọi Suno ──────────────────────────────
+// Thay vì gọi thẳng studio-api.prod.suno.com, các thao tác "có giá trị" (upload,
+// ghép Studio, export, dọn dẹp) đi qua Worker riêng của Suno Pro. Worker xác
+// thực license (Bearer token) TRÊN TỪNG REQUEST — patch bỏ màn "Nhập mã kích
+// hoạt" cũ (ký offline, xem dist/assets/main-9QM-JpB-.js) không còn đủ để dùng
+// được các chức năng chính, vì "cách làm" (payload Studio state, EQ mặc định,
+// endpoint chính xác…) không còn nằm trong app phát hành cho khách nữa.
+const SUNOPRO_WORKER_API = 'https://suno-pro-worker.vudungit92.workers.dev';
+
+function sunoProDeviceIdFile() {
+  return path.join(app.getPath('userData'), 'sunopro-device-id.json');
+}
+
+function sunoProDeviceId() {
+  try {
+    const d = JSON.parse(fs.readFileSync(sunoProDeviceIdFile(), 'utf8'));
+    if (d && typeof d.deviceId === 'string' && d.deviceId) return d.deviceId;
+  } catch (e) {}
+  const deviceId = crypto.randomUUID();
+  try {
+    fs.mkdirSync(path.dirname(sunoProDeviceIdFile()), { recursive: true });
+    fs.writeFileSync(sunoProDeviceIdFile(), JSON.stringify({ deviceId }));
+  } catch (e) {}
+  return deviceId;
+}
+
+function sunoProLicenseFile() {
+  return path.join(app.getPath('userData'), 'sunopro-license.bin');
+}
+
+// Token phiên lưu mã hoá bằng safeStorage (OS keychain) — không bao giờ ở dạng
+// chữ rõ trên đĩa, giống cách app mobile tham khảo dùng flutter_secure_storage.
+function sunoProLoadLicense() {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    const raw = fs.readFileSync(sunoProLicenseFile());
+    const data = JSON.parse(safeStorage.decryptString(raw));
+    return data && typeof data.token === 'string' && data.token ? data : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function sunoProSaveLicense(data) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Hệ điều hành không hỗ trợ lưu trữ an toàn (safeStorage) — không thể lưu kích hoạt.');
+  }
+  const encrypted = safeStorage.encryptString(JSON.stringify(data));
+  fs.mkdirSync(path.dirname(sunoProLicenseFile()), { recursive: true });
+  fs.writeFileSync(sunoProLicenseFile(), encrypted);
+}
+
+function sunoProClearLicense() {
+  try { fs.unlinkSync(sunoProLicenseFile()); } catch (e) {}
+}
+
+// Chặn dùng chùa: "Tải audio từ YouTube" và "Suno Download" (tải/giải mã bài
+// public trên Suno) trước đây chạy hoàn toàn local, không hề gọi tới Worker
+// nên cũng không qua bước kiểm tra Key nào cả — bất kỳ ai cũng dùng được
+// miễn phí, kể cả chưa từng kích hoạt Key. Các handler này giờ đòi hỏi đã
+// kích hoạt Key hợp lệ (như mọi tính năng Suno khác) trước khi chạy.
+function requireSunoProLicense() {
+  const license = sunoProLoadLicense();
+  if (!license || !license.token) {
+    throw new Error('Chưa kích hoạt Suno Pro. Hãy nhập Key kích hoạt trước.');
+  }
+}
+
+// Gọi 1 route trên Worker, đính kèm Bearer token license + x-device-id. Ném
+// lỗi rõ ràng nếu chưa kích hoạt; nếu Worker từ chối do license (401/403) thì
+// xoá token cục bộ luôn — tránh vòng lặp lỗi im lặng ở lần gọi kế tiếp.
+async function callSunoProWorker(pathName, body, method) {
+  const license = sunoProLoadLicense();
+  if (!license || !license.token) {
+    throw new Error('Chưa kích hoạt Suno Pro. Hãy nhập Key kích hoạt trước.');
+  }
+  const httpMethod = method || 'POST';
+  const res = await fetch(SUNOPRO_WORKER_API + pathName, {
+    method: httpMethod,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${license.token}`,
+      'x-device-id': sunoProDeviceId()
+    },
+    ...(httpMethod === 'GET' ? {} : { body: JSON.stringify(body || {}) })
+  });
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch (e) { data = {}; }
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) sunoProClearLicense();
+    throw new Error(data.message || `Suno Pro Worker lỗi HTTP ${res.status}`);
+  }
+  return data;
+}
+
+ipcMain.handle('sunopro-license-status', () => {
+  const license = sunoProLoadLicense();
+  return { activated: !!(license && license.token), license: (license && license.license) || null };
+});
+
+// Thông tin KEY mới nhất (tên, hạn dùng...) — gọi trực tiếp /auth/me trên
+// Worker thay vì chỉ đọc cache cục bộ lúc kích hoạt, để luôn đúng hạn dùng
+// hiện tại (vd. admin vừa gia hạn/thu hồi ở trang quản trị).
+ipcMain.handle('sunopro-license-info', async () => {
+  try {
+    const data = await callSunoProWorker('/auth/me', null, 'GET');
+    return { ok: true, license: data.license };
+  } catch (e) {
+    return { ok: false, message: e.message || 'Không lấy được thông tin Key.' };
+  }
+});
+
+ipcMain.handle('sunopro-license-activate', async (event, payload) => {
+  // Trả { ok:false, message } thay vì throw — Electron tự thêm tiền tố kỹ
+  // thuật "Error occurred in handler for '...'" vào mọi lỗi throw ra từ IPC
+  // handler, hiển thị cho người dùng rất xấu/không thân thiện.
+  const key = payload && typeof payload.key === 'string' ? payload.key.trim() : '';
+  if (!key) return { ok: false, message: 'Thiếu Key kích hoạt.' };
+  const deviceId = sunoProDeviceId();
+  try {
+    const res = await fetch(SUNOPRO_WORKER_API + '/auth/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, deviceId, deviceName: os.hostname() })
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch (e) {}
+    if (!res.ok) return { ok: false, message: data.message || `Kích hoạt thất bại: HTTP ${res.status}` };
+    sunoProSaveLicense({ token: data.token, license: data.license });
+    return { ok: true, license: data.license };
+  } catch (e) {
+    return { ok: false, message: 'Không kết nối được máy chủ kích hoạt. Kiểm tra mạng rồi thử lại.' };
+  }
+});
+
+ipcMain.handle('sunopro-license-logout', () => {
+  sunoProClearLicense();
+  return { ok: true };
+});
+
 const SUNO_API = 'https://studio-api.prod.suno.com';
 const SUNO_CLERK = 'https://clerk.suno.com';
 const SUNO_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -517,6 +685,67 @@ const SUNO_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
 function sunoSessionFile() {
   return path.join(app.getPath('userData'), 'suno-session.json');
 }
+
+// Danh sách model Suno — không có endpoint liệt kê riêng, Suno gắn kèm
+// field `models` ngay trong response /suno/verify (billing/info) mỗi lần
+// kiểm tra session (xem suno-proxy.ts::verify ở Worker, port từ cvt3.js
+// của app tham khảo: nó cũng chỉ đọc lại field này, không gọi API khác).
+// Cache ra 1 file JSON (không nhạy cảm, không phải session) để dropdown
+// Model ở popup Tạo nhạc có dữ liệu ngay cả trước khi verify lại session.
+function modelsCacheFile() {
+  return path.join(app.getPath('userData'), 'models-cache.json');
+}
+var SUNO_STATIC_MODELS = [
+  { key: 'chirp-hawk', name: 'Suno v6', canUse: true, isDefault: true },
+  { key: 'chirp-hawk-wild', name: 'Suno v6 wild', canUse: true, isDefault: false },
+  { key: 'chirp-goose', name: 'Suno v6 mini', canUse: true, isDefault: false }
+];
+function loadModelsCache() {
+  try {
+    const data = JSON.parse(fs.readFileSync(modelsCacheFile(), 'utf8'));
+    return Array.isArray(data.models) && data.models.length ? data.models : SUNO_STATIC_MODELS;
+  } catch (e) {
+    return SUNO_STATIC_MODELS;
+  }
+}
+function saveModelsCache(models) {
+  if (!Array.isArray(models) || !models.length) return;
+  try { fs.writeFileSync(modelsCacheFile(), JSON.stringify({ models, updatedAt: Date.now() }, null, 2)); } catch (e) {}
+}
+ipcMain.handle('suno-models-list', () => ({ models: loadModelsCache() }));
+
+// Danh sách "Phong cách" (style) người dùng đã bấm "Lưu" ở popup Tạo nhạc —
+// lưu local (không nhạy cảm), dùng lại ở lần tạo nhạc sau dù đã tắt app.
+function genStylePresetsFile() {
+  return path.join(app.getPath('userData'), 'gen-style-presets.json');
+}
+function loadGenStylePresets() {
+  try {
+    const data = JSON.parse(fs.readFileSync(genStylePresetsFile(), 'utf8'));
+    return Array.isArray(data.presets) ? data.presets.filter((s) => typeof s === 'string' && s.trim()) : [];
+  } catch (e) {
+    return [];
+  }
+}
+function saveGenStylePresets(presets) {
+  try { fs.writeFileSync(genStylePresetsFile(), JSON.stringify({ presets, updatedAt: Date.now() }, null, 2)); } catch (e) {}
+}
+ipcMain.handle('gen-style-presets-list', () => ({ presets: loadGenStylePresets() }));
+ipcMain.handle('gen-style-presets-add', (event, payload) => {
+  const style = payload && typeof payload.style === 'string' ? payload.style.trim() : '';
+  if (!style) throw new Error('Phong cách trống.');
+  let presets = loadGenStylePresets().filter((s) => s !== style); // đẩy lên đầu nếu trùng
+  presets.unshift(style);
+  if (presets.length > 30) presets = presets.slice(0, 30); // tránh phình file vô hạn
+  saveGenStylePresets(presets);
+  return { presets };
+});
+ipcMain.handle('gen-style-presets-remove', (event, payload) => {
+  const style = payload && typeof payload.style === 'string' ? payload.style : '';
+  const presets = loadGenStylePresets().filter((s) => s !== style);
+  saveGenStylePresets(presets);
+  return { presets };
+});
 
 // Turn Suno's poll-row rejection into a readable sentence instead of raw JSON.
 function sunoRejectionText(row, status) {
@@ -625,15 +854,24 @@ async function sunoRequest(url, options = {}) {
 }
 
 // Resolve the pasted session into a usable Bearer token (+ optional cookie header).
+// device-id mà Suno đòi hỏi trên mọi request KHÔNG phải tự bịa — đúng theo cách Suno Toolkit
+// (extension chính thức) làm, nó lấy từ cookie "ajs_anonymous_id" của chính suno.com, bỏ dấu
+// ngoặc kép bọc ngoài nếu có (một số nơi lưu cookie dạng "uuid" có ngoặc).
+function sunoNormalizeDeviceId(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/^["']|["']$/g, '').trim();
+}
+
 async function sunoResolveToken(session) {
   const raw = sunoExtractSession(session);
   if (!raw) throw new Error('Chưa có session Suno. Dán session tài khoản Suno vào trước.');
-  if (sunoLooksLikeJwt(raw)) return { token: raw, cookieHeader: null };
+  if (sunoLooksLikeJwt(raw)) return { token: raw, cookieHeader: null, deviceId: null };
 
   const cookies = sunoParseCookies(raw);
   const clientVal = cookies.__client;
   const sessionVal = cookies.__session;
   const cookieHeader = raw;
+  const deviceId = sunoNormalizeDeviceId(cookies.ajs_anonymous_id) || null;
 
   // Prefer minting a fresh, short-lived JWT through Clerk when __client exists.
   if (clientVal) {
@@ -662,7 +900,7 @@ async function sunoResolveToken(session) {
           }
         });
         if (tokenRes.json && tokenRes.json.jwt) {
-          return { token: tokenRes.json.jwt, cookieHeader };
+          return { token: tokenRes.json.jwt, cookieHeader, deviceId };
         }
       }
     } catch (e) {
@@ -670,7 +908,7 @@ async function sunoResolveToken(session) {
     }
   }
 
-  if (sessionVal) return { token: sessionVal, cookieHeader };
+  if (sessionVal) return { token: sessionVal, cookieHeader, deviceId };
   throw new Error('Không đọc được token từ session. Dán cả Cookie header (chứa __client/__session) hoặc token eyJ… từ suno.com.');
 }
 
@@ -861,6 +1099,47 @@ function debugLogMain(line) {
   } catch (e) { /* logging must never break the app */ }
 }
 
+function debugLogFile() {
+  return path.join(app.getPath('userData'), 'debug.log');
+}
+
+// Màn hình "Nhật ký tiến trình" trong menu — đọc N dòng cuối của debug.log
+// (append-only ở trên) để người dùng tự xem lý do 1 part/bước bị lỗi mà
+// không cần mò file thủ công ngoài Finder/Explorer.
+ipcMain.handle('debug-log-read', (event, opts) => {
+  try {
+    const file = debugLogFile();
+    if (!fs.existsSync(file)) return { ok: true, text: '', path: file, totalLines: 0 };
+    const content = fs.readFileSync(file, 'utf8');
+    const lines = content.split(/\r?\n/);
+    const maxLines = (opts && Number.isInteger(opts.maxLines) && opts.maxLines > 0) ? opts.maxLines : 3000;
+    const tail = lines.slice(-maxLines);
+    return { ok: true, text: tail.join('\n'), path: file, totalLines: lines.length };
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+});
+
+ipcMain.handle('debug-log-clear', () => {
+  try {
+    fs.writeFileSync(debugLogFile(), '');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+});
+
+ipcMain.handle('debug-log-open-folder', () => {
+  try {
+    const file = debugLogFile();
+    if (!fs.existsSync(file)) fs.mkdirSync(path.dirname(file), { recursive: true }), fs.writeFileSync(file, '');
+    shell.showItemInFolder(file);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+});
+
 ipcMain.handle('suno-session-load', () => {
   try {
     const file = sunoSessionFile();
@@ -885,8 +1164,18 @@ ipcMain.handle('suno-session-save', (event, session) => {
 });
 
 ipcMain.handle('suno-verify', async (event, session) => {
-  const { token, cookieHeader } = await sunoResolveToken(session);
-  return sunoQuota(token, cookieHeader);
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(session);
+  const res = await callSunoProWorker('/suno/verify', { token, cookieHeader, deviceId });
+  if (res && Array.isArray(res.models) && res.models.length) saveModelsCache(res.models);
+  return res;
+});
+
+// Thư viện bài hát THẬT trên Suno (khác songs.json local) — dùng cho popup
+// chọn "Cover reference" ở Tạo nhạc.
+ipcMain.handle('suno-my-songs', async (event, payload) => {
+  if (!payload || !payload.session) throw new Error('Thiếu session Suno.');
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(payload.session);
+  return callSunoProWorker('/suno/my-songs', { token, cookieHeader, deviceId, cursor: payload.cursor || null });
 });
 
 // Toast notification so an upload is never silent (click opens the song).
@@ -911,20 +1200,53 @@ ipcMain.handle('suno-notify', (event, payload) => {
 ipcMain.handle('suno-upload', async (event, payload) => {
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
   if (!payload.session || !payload.buffer) throw new Error('Thiếu session hoặc dữ liệu file');
-  const { token, cookieHeader } = await sunoResolveToken(payload.session);
-  return sunoUploadAudio({
-    token,
-    cookieHeader,
-    buffer: Buffer.from(payload.buffer),
-    filename: payload.filename || 'upload.mp3',
-    title: payload.title || '',
-    artist: payload.artist || '',
-    onProgress: (msg) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('suno-upload-progress', msg);
-      }
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(payload.session);
+  const buffer = Buffer.from(payload.buffer);
+  const name = path.basename(payload.filename || 'upload.mp3');
+  const ext = (path.extname(name) || '.mp3').slice(1).toLowerCase() || 'mp3';
+  const mime = ext === 'wav' ? 'audio/wav' : ext === 'flac' ? 'audio/flac' : 'audio/mpeg';
+  const title = payload.title || '';
+  const artist = payload.artist || '';
+  const progress = (msg) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('suno-upload-progress', msg);
+  };
+
+  // Bước 1-2: mở phiên upload qua Worker, rồi gửi BYTE file THẲNG lên presigned
+  // URL S3 (không qua Worker) — y hệt luồng gốc, chỉ khác nơi xin presigned URL.
+  progress('Đang mở phiên upload trên Suno…');
+  const init = await callSunoProWorker('/suno/upload/init', { token, cookieHeader, deviceId, extension: ext });
+  progress('Đang tải file lên máy chủ Suno…');
+  const form = new FormData();
+  for (const [k, v] of Object.entries(init.fields || {})) form.append(k, String(v));
+  form.append('file', new Blob([buffer], { type: mime }), name);
+  const presignedRes = await fetch(init.url, { method: 'POST', body: form });
+  if (!presignedRes.ok) {
+    throw new Error(`Tải file lên Suno thất bại: HTTP ${presignedRes.status} ${(await presignedRes.text()).slice(0, 220)}`);
+  }
+
+  progress('Đang báo Suno hoàn tất upload…');
+  await callSunoProWorker('/suno/upload/finish', { token, cookieHeader, deviceId, uploadId: init.id, filename: name });
+
+  // Bước 4: poll trạng thái — logic chờ/khoảng nghỉ giữ y nguyên, chỉ đổi nơi gọi.
+  const deadline = Date.now() + 5 * 60 * 1000;
+  const pollStarted = Date.now();
+  let lastProgress = 0;
+  let status = null;
+  while (Date.now() < deadline) {
+    status = await callSunoProWorker('/suno/upload/status', { token, cookieHeader, deviceId, uploadId: init.id });
+    if (status.done) break;
+    const elapsed = Math.round((Date.now() - pollStarted) / 1000);
+    if (elapsed - lastProgress >= 4) {
+      lastProgress = elapsed;
+      progress(`Suno đang xử lý file… ${elapsed}s (tối đa 300s)`);
     }
-  });
+    await new Promise((r) => setTimeout(r, 1800));
+  }
+  if (!status || !status.done) throw new Error('Hết thời gian chờ Suno xử lý file (5 phút). Thử lại.');
+
+  progress('Đang ghi bài vào thư viện Suno…');
+  const final = await callSunoProWorker('/suno/upload/initialize-clip', { token, cookieHeader, deviceId, uploadId: init.id, title, artist });
+  return { clipId: final.clipId, songUrl: final.songUrl, metadataApplied: final.metadataApplied, muted: final.copyrightMuted };
 });
 
 // ─── Suno download (public link → WAV, no login needed) ─────────────────────
@@ -979,6 +1301,7 @@ function sunoExtractClipInfo(html) {
 }
 
 ipcMain.handle('suno-download-resolve', async (event, link) => {
+  requireSunoProLicense();
   const pagePath = sunoParseShareLink(link);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30000);
@@ -1060,6 +1383,7 @@ async function sunoPrepareOfficialDownload(session, clipId) {
 }
 
 ipcMain.handle('suno-download-prepare', async (event, payload) => {
+  requireSunoProLicense();
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
   return sunoPrepareOfficialDownload(payload.session, payload.clipId);
 });
@@ -1153,6 +1477,7 @@ async function sunoMangoDecrypt(session, clipId, encBytes) {
 }
 
 ipcMain.handle('suno-download-decrypt', async (event, payload) => {
+  requireSunoProLicense();
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
   if (!payload.clipId || !payload.bytes) throw new Error('Thiếu clipId hoặc dữ liệu audio.');
   return sunoMangoDecrypt(payload.session, payload.clipId, payload.bytes);
@@ -1280,6 +1605,16 @@ ipcMain.handle('suno-split-assemble', async (event, payload) => {
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
   const { session, seedClipId, seedTitle, seedDurationSec, parts } = payload;
   if (!seedClipId || !Array.isArray(parts) || parts.length === 0) throw new Error('Thiếu seed clip hoặc danh sách parts.');
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(session);
+  return callSunoProWorker('/suno/studio/assemble', { token, cookieHeader, deviceId, seedClipId, seedTitle, seedDurationSec, parts });
+});
+
+// Thân hàm cũ (dựng arrangement state/EQ/timing trực tiếp trong app) đã
+// chuyển sang worker/src/suno-proxy.ts (studioAssemble) — giữ nguyên bên dưới
+// làm tham chiếu/dead-code cho tới khi xác nhận Worker hoạt động đúng trên
+// thực tế, lúc đó sẽ xoá hẳn (xem Phase 3 trong kế hoạch).
+async function suno_split_assemble_LEGACY_unused(payload) {
+  const { session, seedClipId, seedTitle, seedDurationSec, parts } = payload;
   const { token, cookieHeader } = await sunoResolveToken(session);
   const auth = { token, cookieHeader };
   const sorted = parts.slice().sort((a, b) => a.number - b.number);
@@ -1414,77 +1749,327 @@ ipcMain.handle('suno-split-assemble', async (event, payload) => {
     totalSec: totalBeats > 0 ? totalBeats / checkBps : 0,
     gapless, missing
   };
-});
+}
 
 ipcMain.handle('suno-split-inspect', async (event, payload) => {
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
   const { session, projectId } = payload;
   if (!projectId) throw new Error('Thiếu project ID — Ghép Studio trước đã.');
-  const { token, cookieHeader } = await sunoResolveToken(session);
-  const proj = await sunoStudioFetch('/api/studio/project/' + encodeURIComponent(projectId), { token, cookieHeader, timeoutMs: 60000 });
-  const state = (proj && proj.state) || {};
-  const tracks = (Array.isArray(state.tracks) ? state.tracks : []).map((t, i) => ({
-    index: i,
-    name: t?.name || ('(track ' + i + ')'),
-    type: t?.type || '?',
-    id: t?.id || '',
-    clipCount: Array.isArray(t?.clips) ? t.clips.length : 0,
-    clips: (Array.isArray(t?.clips) ? t.clips : []).slice(0, 200).map((c) => ({
-      name: c?.name || '',
-      assetId: c?.asset?.id || '',
-      startBeats: c?.startBeats ?? null,
-      endBeats: c?.endBeats ?? null,
-      mute: !!c?.mute
-    }))
-  }));
-  return {
-    title: proj.title || '',
-    latestVersion: proj.latest_version_id || '',
-    timing: state.timing || null,
-    tracks
-  };
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(session);
+  return callSunoProWorker('/suno/studio/inspect', { token, cookieHeader, deviceId, projectId });
 });
 
 ipcMain.handle('suno-split-export', async (event, payload) => {
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
   const { session, projectId, title } = payload;
   if (!projectId) throw new Error('Thiếu project ID.');
-  const { token, cookieHeader } = await sunoResolveToken(session);
-  const auth = { token, cookieHeader };
-  const proj = await sunoStudioFetch('/api/studio/project/' + encodeURIComponent(projectId), { ...auth, timeoutMs: 60000 });
-  if (!proj || !proj.state) throw new Error('Không đọc được project từ Suno.');
-  const totalBeats = (Array.isArray(proj.state.tracks) ? proj.state.tracks : [])
-    .flatMap((t) => (Array.isArray(t?.clips) ? t.clips : []))
-    .reduce((m, c) => (Number.isFinite(c?.endBeats) ? Math.max(m, c.endBeats) : m), 0);
-  if (!(totalBeats > 0)) throw new Error('Project chưa có audio nào để render.');
-  let bps = proj.state?.timing?.bps;
-  if (!(Number.isFinite(bps) && bps >= 0.3 && bps <= 5)) bps = 2;
-  const body = {
-    title: typeof title === 'string' && title ? title : (proj.title || ''),
-    lyrics: '', tags: '', negative_tags: '', style_summary: '', caption: '',
-    state: proj.state, start_beats: 0, end_beats: totalBeats,
-    project_id: 'default', studio_project_id: projectId,
-    ...(proj.latest_version_id ? { studio_project_version_id: proj.latest_version_id } : {}),
-    web_client_pathname: '/studio', downbeats: sunoStudioDownbeats(totalBeats, bps),
-    export_mode: 'fullsong_export', generate_midi_preview: false
-  };
-  const ren = await sunoStudioFetch('/api/studio/render-state', { ...auth, method: 'POST', body, timeoutMs: 60000 });
-  if (!ren || typeof ren.id !== 'string' || !ren.id) throw new Error('Suno không render được bài từ arrangement này.');
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(session);
+  // Tên file gốc được cố ý ghép tiền tố "_part " ở ĐẦU trước khi đưa vào Suno
+  // (xem index.html) — để dù Suno có cắt bớt phần ĐUÔI tên quá dài thì chữ
+  // "_part" vẫn còn nguyên ở đầu, hệ thống dọn dẹp mới lọc đúng được các
+  // clip part. Nhưng đó là mẹo NỘI BỘ cho việc upload part — bài hoàn chỉnh
+  // xuất ra cuối cùng phải mang tên SẠCH, không được dính tiền tố này.
+  const cleanTitle = typeof title === 'string' ? title.replace(/^_part\s+/i, '') : title;
+  const start = await callSunoProWorker('/suno/studio/export/start', { token, cookieHeader, deviceId, projectId, title: cleanTitle });
   const deadline = Date.now() + 10 * 60 * 1000;
   while (Date.now() < deadline) {
-    const clip = await sunoStudioFetch('/api/feed/v3', { ...auth, method: 'POST', body: { filters: { ids: { presence: 'True', clipIds: [ren.id] } }, limit: 1 }, timeoutMs: 30000 });
-    const row = (clip && Array.isArray(clip.clips) ? clip.clips : []).find((r) => r?.id === ren.id) || null;
-    const status = String(row?.status || '').toLowerCase();
-    if (/error|rejected|failed/.test(status)) throw new Error('Suno render bài thất bại.');
-    if (row && typeof row.audio_url === 'string' && row.audio_url) {
-      return { clipId: ren.id, songUrl: 'https://suno.com/song/' + encodeURIComponent(ren.id), audioUrl: row.audio_url };
+    const status = await callSunoProWorker('/suno/studio/export/status', { token, cookieHeader, deviceId, renderId: start.renderId });
+    if (status.done) {
+      return { clipId: status.clipId, songUrl: status.songUrl, audioUrl: status.audioUrl };
     }
     await new Promise((r) => setTimeout(r, 5000));
   }
   throw new Error('Suno render quá lâu (>10 phút) — mở Studio kiểm tra trực tiếp.');
 });
 
+// ─── Clean up "_part" clips after a successful Split-Studio export ──────
+// Endpoints verified against docs/API.md (TOOL SUNO Extension reference
+// project) and reused via the same sunoStudioFetch helper the Studio
+// render pipeline above already relies on (host fallback, timeouts, 404
+// handling all shared). Trash is the only AUTOMATIC action (reversible in
+// Suno); permanent delete is a separate, explicit, user-triggered call.
+async function sunoListAllClipsByTitleFilter(auth, userId, titleContains) {
+  const matches = [];
+  let cursor = null;
+  for (let guard = 0; guard < 200; guard++) {
+    const body = { cursor, limit: 100, filters: { trashed: 'False', user: { presence: 'True', userId } } };
+    const res = await sunoStudioFetch('/api/feed/v3', { ...auth, method: 'POST', body, timeoutMs: 30000 });
+    const clips = Array.isArray(res && res.clips) ? res.clips : [];
+    for (const c of clips) {
+      if (c && typeof c.title === 'string' && c.title.indexOf(titleContains) !== -1) {
+        matches.push({ id: c.id, title: c.title });
+      }
+    }
+    cursor = res && res.next_cursor;
+    if (!cursor) break;
+  }
+  return matches;
+}
+
+ipcMain.handle('suno-cleanup-parts', async (event, payload) => {
+  if (!payload || !payload.session) throw new Error('Thiếu session Suno.');
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(payload.session);
+  return callSunoProWorker('/suno/cleanup', { token, cookieHeader, deviceId });
+});
+
+ipcMain.handle('suno-permanent-delete', async (event, payload) => {
+  if (!payload || !payload.session || !Array.isArray(payload.ids) || !payload.ids.length) {
+    throw new Error('Thiếu session hoặc danh sách ID.');
+  }
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(payload.session);
+  return callSunoProWorker('/suno/permanent-delete', { token, cookieHeader, deviceId, ids: payload.ids });
+});
+
+// Chuyển 1 bài hoàn chỉnh vào thùng rác Suno (reversible) — dùng ở nút "Xóa
+// trên Suno" trang chi tiết bài hát (xem index.html).
+ipcMain.handle('suno-trash-clip', async (event, payload) => {
+  if (!payload || !payload.session || !Array.isArray(payload.ids) || !payload.ids.length) {
+    throw new Error('Thiếu session hoặc danh sách ID.');
+  }
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(payload.session);
+  return callSunoProWorker('/suno/trash-clip', { token, cookieHeader, deviceId, ids: payload.ids });
+});
+
+// ─── Tạo nhạc bằng AI (Generate — chế độ Tùy chỉnh) ──────────────────────
+// 1 lệnh gọi duy nhất từ renderer: gọi /suno/generate (trả về ngay 2 clip ID
+// chưa có audio) rồi tự poll /suno/generate-status mỗi 5s tới khi cả 2 xong
+// hoặc lỗi hoặc quá 10 phút — cùng nhịp độ với app Flutter tham khảo. Gửi
+// tiến trình qua 'suno-generate-progress' để renderer hiện % giống popup xử
+// lý hiện có.
+ipcMain.handle('suno-generate', async (event, payload) => {
+  if (!payload || !payload.session) throw new Error('Thiếu session Suno.');
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(payload.session);
+  const sendProgress = (msg) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('suno-generate-progress', msg);
+  };
+
+  sendProgress({ phase: 'submitting' });
+  const started = await callSunoProWorker('/suno/generate', {
+    token, cookieHeader, deviceId,
+    title: payload.title, tags: payload.tags, prompt: payload.prompt, mv: payload.mv,
+    makeInstrumental: payload.makeInstrumental, isMaxMode: payload.isMaxMode,
+    styleWeight: payload.styleWeight, weirdnessConstraint: payload.weirdnessConstraint,
+    augCreativity: payload.augCreativity, usePersonalization: payload.usePersonalization,
+    coverClipId: payload.coverClipId || undefined, audioWeight: payload.audioWeight
+  });
+  const clipIds = Array.isArray(started.clipIds) ? started.clipIds : [];
+  if (!clipIds.length) throw new Error('Suno không trả về clip nào.');
+
+  const deadline = Date.now() + 10 * 60 * 1000;
+  const doneClips = new Map();
+  sendProgress({ phase: 'polling', total: clipIds.length, done: 0 });
+  while (Date.now() < deadline && doneClips.size < clipIds.length) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const statusRes = await callSunoProWorker('/suno/generate-status', { token, cookieHeader, deviceId, clipIds });
+    const rows = Array.isArray(statusRes.clips) ? statusRes.clips : [];
+    for (const row of rows) {
+      if (doneClips.has(row.clipId)) continue;
+      if (row.failed) { doneClips.set(row.clipId, { ...row, failed: true }); }
+      else if (row.ready) { doneClips.set(row.clipId, row); }
+    }
+    sendProgress({ phase: 'polling', total: clipIds.length, done: doneClips.size });
+  }
+  const clips = clipIds.map((id) => doneClips.get(id) || { clipId: id, failed: true, status: 'timeout' });
+  if (clips.every((c) => c.failed)) throw new Error('Suno tạo nhạc thất bại hoặc quá thời gian chờ (>10 phút).');
+  return { clips };
+});
+
+// ─── Albums + Songs ──────────────────────────────────────────────────────
+// Persisted as two JSON files under userData — same pattern as
+// suno-session.json/activation.json above. "Album" is purely an
+// organizing/naming container: the user picks or creates one on launch
+// (see the Albums gate in the renderer), and its name feeds the
+// "<Album> - <song title>_partN" naming formula used for every upload.
+// Every completed song is recorded in songs.json with the album it
+// belonged to at the time — ALWAYS some album, or `albumId: null` for
+// "Chưa phân loại" (only reached by deleting the album a song belonged
+// to: the song record itself is never deleted, only unassigned, exactly
+// mirroring the "Chỉ gỡ nhóm" behavior of the reference mobile app).
+function albumsFile() {
+  return path.join(app.getPath('userData'), 'albums.json');
+}
+function songsFile() {
+  return path.join(app.getPath('userData'), 'songs.json');
+}
+function loadAlbums() {
+  try {
+    const data = JSON.parse(fs.readFileSync(albumsFile(), 'utf8'));
+    return Array.isArray(data.albums) ? data.albums : [];
+  } catch (e) {
+    return [];
+  }
+}
+function saveAlbums(albums) {
+  fs.writeFileSync(albumsFile(), JSON.stringify({ albums }, null, 2));
+}
+function loadSongs() {
+  try {
+    const data = JSON.parse(fs.readFileSync(songsFile(), 'utf8'));
+    return Array.isArray(data.songs) ? data.songs : [];
+  } catch (e) {
+    return [];
+  }
+}
+function saveSongs(songs) {
+  fs.writeFileSync(songsFile(), JSON.stringify({ songs }, null, 2));
+}
+
+ipcMain.handle('albums-list', async () => {
+  const albums = loadAlbums();
+  const songs = loadSongs();
+  const withCounts = albums.map((a) => {
+    const albumSongs = songs.filter((s) => s.albumId === a.id);
+    const totalDurationSec = albumSongs.reduce((sum, s) => sum + (Number.isFinite(s.durationSec) ? s.durationSec : 0), 0);
+    const lastSong = albumSongs.slice().sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0))[0];
+    return {
+      ...a,
+      songCount: albumSongs.length,
+      doneCount: albumSongs.length,
+      totalDurationSec,
+      lastSongDurationSec: (lastSong && Number.isFinite(lastSong.durationSec)) ? lastSong.durationSec : null
+    };
+  });
+  const unassignedCount = songs.filter((s) => !s.albumId).length;
+  return { albums: withCounts, unassignedCount };
+});
+
+ipcMain.handle('albums-create', async (event, payload) => {
+  const name = String((payload && payload.name) || '').replace(/\s+/g, ' ').trim();
+  if (!name) throw new Error('Hãy nhập tên album.');
+  if (name.length > 60) throw new Error('Tên album tối đa 60 ký tự.');
+  const albums = loadAlbums();
+  if (albums.some((a) => a.name.toLowerCase() === name.toLowerCase())) {
+    throw new Error('Đã có album trùng tên.');
+  }
+  const album = {
+    id: crypto.randomUUID(),
+    name,
+    color: (payload && payload.color) || '#1fb5b5',
+    createdAt: Date.now()
+  };
+  albums.push(album);
+  saveAlbums(albums);
+  return album;
+});
+
+ipcMain.handle('albums-update', async (event, payload) => {
+  if (!payload || !payload.id) throw new Error('Thiếu album ID.');
+  const albums = loadAlbums();
+  const album = albums.find((a) => a.id === payload.id);
+  if (!album) throw new Error('Không tìm thấy album.');
+  if (payload.name !== undefined) {
+    const name = String(payload.name).replace(/\s+/g, ' ').trim();
+    if (!name) throw new Error('Hãy nhập tên album.');
+    if (name.length > 60) throw new Error('Tên album tối đa 60 ký tự.');
+    if (albums.some((a) => a.id !== album.id && a.name.toLowerCase() === name.toLowerCase())) {
+      throw new Error('Đã có album trùng tên.');
+    }
+    album.name = name;
+  }
+  if (payload.color !== undefined) album.color = payload.color;
+  saveAlbums(albums);
+  return album;
+});
+
+// Deleting an album only removes the grouping — its songs are kept and
+// reassigned to "Chưa phân loại" (albumId: null), never deleted. Nothing
+// on Suno itself is touched.
+ipcMain.handle('albums-delete', async (event, payload) => {
+  if (!payload || !payload.id) throw new Error('Thiếu album ID.');
+  saveAlbums(loadAlbums().filter((a) => a.id !== payload.id));
+  const songs = loadSongs();
+  let changed = false;
+  for (const s of songs) {
+    if (s.albumId === payload.id) { s.albumId = null; changed = true; }
+  }
+  if (changed) saveSongs(songs);
+  return { ok: true };
+});
+
+// Recorded once per completed song (right after a successful "Xuất full
+// MP3" — see index.html). `albumId` is whatever album was active at the
+// time; every song is created WITH an album (the gate requires picking
+// one first), so `albumId: null` only ever happens after that album is
+// later deleted.
+ipcMain.handle('songs-add', async (event, payload) => {
+  const title = String((payload && payload.title) || '').trim() || 'Untitled';
+  const albumId = (payload && payload.albumId) || null;
+  const durationSec = (payload && Number.isFinite(payload.durationSec) && payload.durationSec > 0) ? payload.durationSec : null;
+  const partsCount = (payload && Number.isFinite(payload.partsCount) && payload.partsCount > 0) ? payload.partsCount : null;
+  const startedAt = (payload && Number.isFinite(payload.startedAt)) ? payload.startedAt : null;
+  const finishedAt = (payload && Number.isFinite(payload.finishedAt)) ? payload.finishedAt : Date.now();
+  const clipId = (payload && typeof payload.clipId === 'string' && payload.clipId) ? payload.clipId : null;
+  const songUrl = (payload && typeof payload.songUrl === 'string' && payload.songUrl) ? payload.songUrl : null;
+  const audioUrl = (payload && typeof payload.audioUrl === 'string' && payload.audioUrl) ? payload.audioUrl : null;
+  const songs = loadSongs();
+  const song = { id: crypto.randomUUID(), title, albumId, durationSec, partsCount, startedAt, finishedAt, clipId, songUrl, audioUrl, createdAt: Date.now() };
+  songs.push(song);
+  saveSongs(songs);
+  return song;
+});
+
+// `payload.albumId`: omit for all songs, `null` for "Chưa phân loại", or
+// a specific album's id.
+ipcMain.handle('songs-list', async (event, payload) => {
+  const songs = loadSongs();
+  if (!payload || payload.albumId === undefined) return { songs };
+  return { songs: songs.filter((s) => s.albumId === payload.albumId) };
+});
+
+// Mở 1 URL bằng trình duyệt mặc định hệ thống — dùng cho nút "Mở bài trên
+// Suno" ở trang chi tiết bài hát. Chỉ cho phép http(s), tránh mở nhầm
+// scheme khác (file://, javascript:…) nếu dữ liệu sau này bị hỏng/giả mạo.
+ipcMain.handle('open-external', async (event, url) => {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) throw new Error('URL không hợp lệ.');
+  await shell.openExternal(url);
+  return { ok: true };
+});
+
+// Đổi album của 1 bài đã lưu ("Đổi album" ở trang chi tiết bài hát).
+ipcMain.handle('songs-update', async (event, payload) => {
+  if (!payload || !payload.id) throw new Error('Thiếu song ID.');
+  const songs = loadSongs();
+  const song = songs.find((s) => s.id === payload.id);
+  if (!song) throw new Error('Không tìm thấy bài hát.');
+  if (payload.albumId !== undefined) song.albumId = payload.albumId;
+  saveSongs(songs);
+  return song;
+});
+
+// Xoá hẳn record local — dùng sau khi "Xóa trên Suno" đã trash thành công
+// trên server (xem suno-trash-clip), hoặc khi người dùng chỉ muốn bỏ khỏi
+// danh sách (không đụng gì trên Suno).
+ipcMain.handle('songs-delete', async (event, payload) => {
+  if (!payload || !payload.id) throw new Error('Thiếu song ID.');
+  const songs = loadSongs();
+  saveSongs(songs.filter((s) => s.id !== payload.id));
+  return { ok: true };
+});
+
+// Copies a picked/downloaded audio file into a temp staging dir under a
+// new, sanitized basename — used so the EXISTING import pipeline (which
+// derives its internal "file name"/song title from the real file's
+// basename) picks up "<Album> - <song title>" or "<Album>" automatically,
+// with zero changes to that pipeline's own logic.
+ipcMain.handle('prepare-import-title', async (event, payload) => {
+  if (!payload || !payload.sourcePath || !payload.desiredBaseName) {
+    throw new Error('Thiếu dữ liệu đổi tên file.');
+  }
+  const ext = path.extname(payload.sourcePath) || '.mp3';
+  const safeName = String(payload.desiredBaseName)
+    .replace(/[\u0000-\u001f<>:"/\\|?*]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 150) || 'Untitled';
+  const dir = path.join(app.getPath('temp'), 'sunopro-import-staged');
+  fs.mkdirSync(dir, { recursive: true });
+  const destPath = path.join(dir, `${safeName}${ext}`);
+  fs.copyFileSync(payload.sourcePath, destPath);
+  return { path: destPath };
+});
+
 ipcMain.handle('suno-download-bytes', async (event, audioUrl) => {
+  requireSunoProLicense();
   const u = String(audioUrl || '');
   if (!/^https:\/\//i.test(u)) throw new Error('URL audio không hợp lệ.');
   const ctrl = new AbortController();
@@ -2432,6 +3017,7 @@ function youtubeParseVideoId(input) {
 }
 
 ipcMain.handle('youtube-resolve', async (_evt, link) => {
+  requireSunoProLicense();
   const { Innertube } = await import('youtubei.js');
   const id = youtubeParseVideoId(link);
   if (!id) throw new Error('Link YouTube không hợp lệ.');
@@ -2456,6 +3042,7 @@ ipcMain.handle('youtube-resolve', async (_evt, link) => {
 const YT_DOWNLOAD_CLIENTS = ['VISIONOS', 'IOS', 'ANDROID', 'WEB', 'TV'];
 
 ipcMain.handle('youtube-download', async (event, payload) => {
+  requireSunoProLicense();
   const { Innertube, Utils } = await import('youtubei.js');
   const id = youtubeParseVideoId(payload && payload.link);
   if (!id) throw new Error('Link YouTube không hợp lệ.');

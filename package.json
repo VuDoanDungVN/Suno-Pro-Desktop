@@ -5,12 +5,19 @@
   "main": "electron/main.js",
   "author": "",
   "license": "ISC",
+  "scripts": {
+    "start": "electron .",
+    "package:mac": "electron-packager . \"Suno Pro\" --overwrite --platform=darwin --arch=arm64,x64 --icon=build/icon.icns --out=out --app-bundle-id=com.sunopro.app --prune=true --ignore=\"^/out($|/)\" --ignore=\"^/dist/assets/.*\\.map$\"",
+    "package:win": "node scripts/package-win.js && node scripts/set-win-icon.js",
+    "package:all": "npm run package:mac && npm run package:win"
+  },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
     "youtubei.js": "^18.3.0"
   },
   "devDependencies": {
     "electron": "^44.8.0",
-    "electron-packager": "^17.1.2"
+    "electron-packager": "^17.1.2",
+    "resedit": "^3.1.0"
   }
 }
