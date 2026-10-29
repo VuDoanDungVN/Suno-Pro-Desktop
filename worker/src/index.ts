@@ -9,8 +9,29 @@
 // app cài trên máy khách đã bị patch bỏ phần kiểm tra license hay chưa.
 
 import { CORS_HEADERS, HttpError, json } from "./http";
-import { Ctx, activate, adminCreate, adminDelete, adminList, adminResetDevice, adminRotateKey, adminUpdate, authorize, logout, me, requireAdmin, requireApp } from "./auth";
+import {
+  Ctx,
+  activate,
+  adminCreate,
+  adminCreateBulk,
+  adminDelete,
+  adminDeleteExpiredTrials,
+  adminGetTrialCode,
+  adminList,
+  adminListTrialLeads,
+  adminResetDevice,
+  adminRotateKey,
+  adminSetTrialCode,
+  adminUpdate,
+  authorize,
+  logout,
+  me,
+  requireAdmin,
+  requireApp,
+} from "./auth";
 import { adminPageHtml } from "./admin-page";
+import { requestOtp, trialPageHtml, verifyOtp } from "./trial";
+import { broadcastPreview, broadcastStart, broadcastStatus } from "./broadcast";
 import {
   cleanup,
   downloadPrepare,
@@ -77,6 +98,15 @@ export default {
         await requireAdmin(request, env);
         if (pathname === "/admin/licenses" && method === "GET") return adminList(env);
         if (pathname === "/admin/licenses" && method === "POST") return adminCreate(request, env);
+        if (pathname === "/admin/licenses/bulk" && method === "POST") return adminCreateBulk(request, env);
+        if (pathname === "/admin/licenses/trial/expired" && method === "DELETE") return adminDeleteExpiredTrials(env);
+        if (pathname === "/admin/trial-leads" && method === "GET") return adminListTrialLeads(env);
+        if (pathname === "/admin/trial-leads/broadcast/preview" && method === "POST") return broadcastPreview(request, env);
+        if (pathname === "/admin/trial-leads/broadcast" && method === "POST") return broadcastStart(request, env);
+        const bm = pathname.match(/^\/admin\/trial-leads\/broadcast\/([0-9a-f-]{8,36})$/);
+        if (bm && method === "GET") return broadcastStatus(env, bm[1]);
+        if (pathname === "/admin/trial-code" && method === "GET") return adminGetTrialCode(env);
+        if (pathname === "/admin/trial-code" && method === "POST") return adminSetTrialCode(request, env);
         const m = pathname.match(/^\/admin\/licenses\/([0-9a-f-]{8,36})(\/reset-device|\/rotate-key)?$/);
         if (m && !m[2] && method === "PATCH") return adminUpdate(request, env, m[1]);
         if (m && !m[2] && method === "DELETE") return adminDelete(env, m[1]);
@@ -84,6 +114,11 @@ export default {
         if (m && m[2] === "/rotate-key" && method === "POST") return adminRotateKey(env, m[1]);
         throw new HttpError(404, "not_found", "Không có đường dẫn này.");
       }
+
+      // ---- Trang tự phục vụ: nhận key dùng thử (chưa cần đăng nhập) ----
+      if (pathname === "/trial" && method === "GET") return trialPageHtml();
+      if (pathname === "/trial/request-otp" && method === "POST") return requestOtp(request, env);
+      if (pathname === "/trial/verify-otp" && method === "POST") return verifyOtp(request, env);
 
       // ---- Kích hoạt KEY (chưa cần đăng nhập) ----
       if (pathname === "/auth/activate" && method === "POST") return activate(request, env);

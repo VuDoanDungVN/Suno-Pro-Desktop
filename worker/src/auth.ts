@@ -31,6 +31,7 @@ interface LicenseRow {
   note: string | null;
   status: "active" | "revoked";
   expires_at: number | null;
+  is_trial: number;
   device_id: string | null;
   device_name: string | null;
   activated_at: number | null;
@@ -76,6 +77,7 @@ function licenseView(row: LicenseRow) {
     keyHint: row.key_hint,
     status: row.status,
     expiresAt: row.expires_at,
+    isTrial: !!row.is_trial,
     daysLeft: row.expires_at === null ? null : Math.max(0, Math.ceil((row.expires_at - now()) / DAY_MS)),
     deviceName: row.device_name,
     activatedAt: row.activated_at,
@@ -145,7 +147,7 @@ async function newSession(env: Env, licenseId: string, deviceName: string | null
 // Chặn dò KEY theo IP
 // ---------------------------------------------------------------------------
 
-async function assertNotRateLimited(env: Env, rateKey: string, maxFails: number, lockMs: number): Promise<void> {
+export async function assertNotRateLimited(env: Env, rateKey: string, maxFails: number, lockMs: number): Promise<void> {
   const row = await env.DB.prepare("SELECT value FROM meta WHERE key = ?").bind(rateKey).first<{ value: string }>();
   const state = row ? (JSON.parse(row.value) as { count: number; at: number }) : { count: 0, at: 0 };
   if (state.count >= maxFails && now() - state.at < lockMs) {
@@ -153,7 +155,7 @@ async function assertNotRateLimited(env: Env, rateKey: string, maxFails: number,
   }
 }
 
-async function recordRateLimitFail(env: Env, rateKey: string, lockMs: number): Promise<void> {
+export async function recordRateLimitFail(env: Env, rateKey: string, lockMs: number): Promise<void> {
   const row = await env.DB.prepare("SELECT value FROM meta WHERE key = ?").bind(rateKey).first<{ value: string }>();
   const state = row ? (JSON.parse(row.value) as { count: number; at: number }) : { count: 0, at: 0 };
   const count = now() - state.at < lockMs ? state.count + 1 : 1;
@@ -162,8 +164,28 @@ async function recordRateLimitFail(env: Env, rateKey: string, lockMs: number): P
     .run();
 }
 
-async function clearRateLimit(env: Env, rateKey: string): Promise<void> {
+export async function clearRateLimit(env: Env, rateKey: string): Promise<void> {
   await env.DB.prepare("DELETE FROM meta WHERE key = ?").bind(rateKey).run();
+}
+
+// ---------------------------------------------------------------------------
+// Kho key-value nhỏ dùng chung (bảng `meta` có sẵn) — cho mã xác nhận nhóm
+// Zalo và trạng thái OTP tạm thời của luồng tự phục vụ /trial/*.
+// ---------------------------------------------------------------------------
+
+export async function metaGet(env: Env, key: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT value FROM meta WHERE key = ?").bind(key).first<{ value: string }>();
+  return row ? row.value : null;
+}
+
+export async function metaSet(env: Env, key: string, value: string): Promise<void> {
+  await env.DB.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .bind(key, value)
+    .run();
+}
+
+export async function metaDelete(env: Env, key: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM meta WHERE key = ?").bind(key).run();
 }
 
 // ---------------------------------------------------------------------------
@@ -351,6 +373,7 @@ export async function adminList(env: Env): Promise<Response> {
       note: r.note,
       status: r.status,
       expiresAt: r.expires_at,
+      isTrial: !!r.is_trial,
       deviceBound: !!r.device_id,
       deviceName: r.device_name,
       activatedAt: r.activated_at,
@@ -384,6 +407,126 @@ export async function adminCreate(request: Request, env: Env): Promise<Response>
     .bind(id, hash, hint, enc, name, email, note, durationMs ? t + durationMs : null, t, t)
     .run();
   return json({ key, license: licenseView(await getLicense(env, id)) });
+}
+
+/** `POST /admin/licenses/bulk { count, days?, hours?, note?, namePrefix? }` → tạo nhiều key dùng
+ * thử cùng lúc (mặc định 1 ngày), đánh dấu `is_trial = 1` để lọc/dọn dẹp riêng. Trả về toàn bộ
+ * KEY gốc (chỉ lúc này mới xem được, giống `adminCreate`). `count` tối đa 1000/lần. */
+export async function adminCreateBulk(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<{ count?: unknown; days?: unknown; hours?: unknown; note?: unknown; namePrefix?: unknown }>(request);
+  const count = typeof body.count === "number" ? Math.floor(body.count) : 0;
+  if (count < 1 || count > 1000) throw new HttpError(400, "bad_count", "Số lượng key phải từ 1 đến 1000.");
+  const hours = typeof body.hours === "number" && body.hours > 0 ? body.hours : null;
+  const days = typeof body.days === "number" && body.days > 0 ? body.days : 1;
+  const durationMs = hours ? hours * 60 * 60_000 : days * DAY_MS;
+  const note = cleanText(body.note, 500);
+  const namePrefix = cleanText(body.namePrefix, 60) ?? "Dùng thử";
+  const t = now();
+  const expiresAt = t + durationMs;
+  const items = await Promise.all(
+    Array.from({ length: count }, async (_, i) => {
+      const { key, hash, hint, enc } = await newKey(env);
+      return { id: crypto.randomUUID(), key, hash, hint, enc, name: `${namePrefix} #${i + 1}` };
+    }),
+  );
+  const CHUNK = 50; // D1 batch() an toàn hơn khi chia nhỏ thay vì gửi hàng trăm câu lệnh 1 lần.
+  for (let i = 0; i < items.length; i += CHUNK) {
+    await env.DB.batch(
+      items.slice(i, i + CHUNK).map((it) =>
+        env.DB.prepare(
+          `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, is_trial, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, NULL, ?, 'active', ?, 1, ?, ?)`,
+        ).bind(it.id, it.hash, it.hint, it.enc, it.name, note, expiresAt, t, t),
+      ),
+    );
+  }
+  return json({ count, expiresAt, keys: items.map((it) => ({ name: it.name, key: it.key })) });
+}
+
+/** `DELETE /admin/licenses/trial/expired` — dọn hàng loạt key dùng thử (`is_trial = 1`) đã hết
+ * hạn, không đụng tới key khách hàng trả phí hay key trial còn hiệu lực. */
+export async function adminDeleteExpiredTrials(env: Env): Promise<Response> {
+  const t = now();
+  const { results } = await env.DB.prepare("SELECT id FROM licenses WHERE is_trial = 1 AND expires_at IS NOT NULL AND expires_at <= ?")
+    .bind(t)
+    .all<{ id: string }>();
+  const ids = results.map((r) => r.id);
+  const CHUNK = 50;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM sessions WHERE license_id IN (${placeholders})`).bind(...chunk),
+      env.DB.prepare(`DELETE FROM licenses WHERE id IN (${placeholders})`).bind(...chunk),
+    ]);
+  }
+  return json({ ok: true, deleted: ids.length });
+}
+
+/** Dùng bởi luồng tự phục vụ `/trial/*` — tạo đúng 1 key trial gắn với email đã xác minh OTP. */
+export async function createTrialLicense(env: Env, name: string, email: string, days: number) {
+  const durationMs = days * DAY_MS;
+  const { key, hash, hint, enc } = await newKey(env);
+  const id = crypto.randomUUID();
+  const t = now();
+  await env.DB.prepare(
+    `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, is_trial, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, NULL, 'active', ?, 1, ?, ?)`,
+  )
+    .bind(id, hash, hint, enc, name, email, t + durationMs, t, t)
+    .run();
+  return { key, license: licenseView(await getLicense(env, id)) };
+}
+
+/** Email này đã từng nhận key dùng thử chưa — chặn 1 người xin nhiều lần. */
+export async function hasClaimedTrial(env: Env, email: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT id FROM licenses WHERE is_trial = 1 AND email = ? LIMIT 1").bind(email).first<{ id: string }>();
+  return !!row;
+}
+
+/** Ghi nhận 1 email đã điền form /trial (kể cả chưa xác minh OTP xong) — phục vụ thu thập email.
+ * `email` là UNIQUE: đăng ký lại chỉ cập nhật `name`/`requested_at`, không tạo dòng mới. */
+export async function recordTrialLead(env: Env, email: string, name: string): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO trial_leads (id, email, name, requested_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(email) DO UPDATE SET name = excluded.name, requested_at = excluded.requested_at`,
+  )
+    .bind(crypto.randomUUID(), email, name, now())
+    .run();
+}
+
+/** Đánh dấu email đã xác minh OTP xong (có thể không có key nếu lúc đó đã bị `already_claimed`). */
+export async function markTrialLeadVerified(env: Env, email: string): Promise<void> {
+  await env.DB.prepare("UPDATE trial_leads SET verified_at = ? WHERE email = ?").bind(now(), email).run();
+}
+
+/** `GET /admin/trial-leads` — toàn bộ email đã từng đăng ký nhận key dùng thử. */
+export async function adminListTrialLeads(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare("SELECT * FROM trial_leads ORDER BY requested_at DESC").all<{
+    id: string;
+    email: string;
+    name: string | null;
+    requested_at: number;
+    verified_at: number | null;
+  }>();
+  return json({
+    leads: results.map((r) => ({ id: r.id, email: r.email, name: r.name, requestedAt: r.requested_at, verifiedAt: r.verified_at })),
+  });
+}
+
+/** `GET /admin/trial-code` — mã xác nhận hiện tại cần nhập trong nhóm Zalo để nhận key dùng thử
+ * tại trang công khai `/trial`. */
+export async function adminGetTrialCode(env: Env): Promise<Response> {
+  return json({ code: (await metaGet(env, "trial_zalo_code")) ?? null });
+}
+
+/** `POST /admin/trial-code { code }` — đổi mã (ví dụ mỗi tuần), rồi ghim mã mới trong nhóm Zalo. */
+export async function adminSetTrialCode(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<{ code?: unknown }>(request);
+  const code = cleanText(body.code, 40);
+  if (!code) throw new HttpError(400, "bad_code", "Mã không hợp lệ.");
+  await metaSet(env, "trial_zalo_code", code);
+  return json({ ok: true, code });
 }
 
 /** `PATCH /admin/licenses/:id { name?, email?, note?, status?, expiresAt?, extendDays? }`

@@ -10,4 +10,11 @@ interface Env {
   FIREBASE_PROJECT_ID?: string;
   // Danh sách email được cấp quyền quản trị, cách nhau bằng dấu phẩy.
   ADMIN_EMAILS?: string;
+  // Gửi mail (OTP xác minh + KEY dùng thử) qua Gmail API bằng OAuth2 refresh token của 1 Gmail
+  // thật — không cần SMTP/nodemailer (Workers không hỗ trợ tốt TCP/SMTP), chỉ gọi HTTPS thường.
+  GMAIL_CLIENT_ID?: string;
+  GMAIL_CLIENT_SECRET?: string;
+  GMAIL_REFRESH_TOKEN?: string;
+  // Địa chỉ Gmail dùng để gửi (phải trùng tài khoản đã cấp refresh token ở trên).
+  GMAIL_SENDER?: string;
 }

@@ -231,13 +231,29 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   <main class="page">
     <div class="page-head">
       <div><h1>Khách hàng & key</h1><p>Tạo key, gia hạn, thu hồi và theo dõi thiết bị của từng khách.</p></div>
-      <button class="btn primary" id="new-key" type="button"></button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn ghost" id="view-leads" type="button"></button>
+        <button class="btn ghost" id="broadcast-key" type="button"></button>
+        <button class="btn ghost" id="cleanup-trial" type="button"></button>
+        <button class="btn" id="bulk-key" type="button"></button>
+        <button class="btn primary" id="new-key" type="button"></button>
+      </div>
     </div>
 
     <section class="kpis" id="kpis" aria-label="Tổng quan"></section>
 
+    <section class="panel" style="padding:14px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <strong style="white-space:nowrap">Mã xác nhận nhóm Zalo</strong>
+      <input class="input" id="trial-code-input" style="max-width:200px" maxlength="40" placeholder="Chưa đặt mã">
+      <button class="btn sm" id="trial-code-save" type="button"></button>
+      <span class="sub" style="flex:1 1 220px">Ghim mã này trong nhóm Zalo — người dùng cần nhập đúng mã mới nhận được key dùng thử tại trang <code>/trial</code>.</span>
+    </section>
+
     <div class="toolbar">
       <div class="tabs" role="tablist" id="tabs"></div>
+      <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;white-space:nowrap">
+        <input type="checkbox" id="trial-only"> Chỉ key dùng thử
+      </label>
       <div class="input-wrap search" data-icon="search"><input class="input" id="search" placeholder="Tìm tên khách, ghi chú, 4 ký tự cuối của key…"></div>
       <select class="input" id="sort" aria-label="Sắp xếp">
         <option value="created">Mới tạo trước</option>
@@ -284,6 +300,75 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     <label class="field"><span>Ghi chú (chỉ bạn thấy)</span><textarea class="input" name="note" rows="2" maxlength="300" placeholder="Đã thanh toán, kênh liên hệ…"></textarea></label>
     <div class="d-actions"><button class="btn ghost" value="cancel" formnovalidate>Hủy</button><button class="btn primary" value="ok">Tạo key</button></div>
   </form>
+</dialog>
+
+<dialog id="bulk-create">
+  <div class="d-head"><h2>Tạo hàng loạt key dùng thử</h2><p>Mỗi key có hạn dùng 1 ngày kể từ lúc tạo, chỉ kích hoạt được trên 1 thiết bị.</p></div>
+  <form method="dialog" id="bulk-create-form">
+    <label class="field"><span>Số lượng key</span><input class="input" name="count" type="number" min="1" max="1000" step="1" value="100" required></label>
+    <label class="field"><span>Ghi chú (chỉ bạn thấy)</span><input class="input" name="note" maxlength="300" placeholder="Đợt dùng thử ngày…"></label>
+    <div class="d-actions"><button class="btn ghost" value="cancel" formnovalidate>Hủy</button><button class="btn primary" value="ok">Tạo hàng loạt</button></div>
+  </form>
+</dialog>
+
+<dialog id="bulk-reveal">
+  <div class="d-head"><h2>Đã tạo <span id="bulk-count"></span> key dùng thử</h2><p>Tải xuống hoặc sao chép để gửi cho người dùng thử.</p></div>
+  <div class="d-body">
+    <textarea class="input" id="bulk-keys" rows="10" readonly style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px"></textarea>
+    <div class="d-actions"><button class="btn" id="bulk-copy" type="button"></button><button class="btn" id="bulk-download" type="button"></button><button class="btn primary" id="bulk-done" type="button">Xong</button></div>
+  </div>
+</dialog>
+
+<dialog id="leads" style="width:min(640px, calc(100vw - 32px))">
+  <div class="d-head"><h2>Email đã đăng ký nhận key dùng thử</h2><p>Kể cả người chưa xác minh OTP xong — dùng để liên hệ lại hoặc làm danh sách marketing.</p></div>
+  <div class="d-body">
+    <div style="max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:10px">
+      <table>
+        <thead><tr><th>Tên</th><th>Email</th><th>Đăng ký lúc</th><th>Trạng thái</th></tr></thead>
+        <tbody id="leads-rows"></tbody>
+      </table>
+    </div>
+    <p class="sub" id="leads-empty" hidden style="padding:16px 0 0;text-align:center">Chưa có ai đăng ký.</p>
+    <div class="d-actions"><button class="btn" id="leads-download" type="button"></button><button class="btn primary" id="leads-done" type="button">Đóng</button></div>
+  </div>
+</dialog>
+
+<dialog id="broadcast" style="width:min(560px, calc(100vw - 32px))">
+  <div class="d-head"><h2>Soạn & gửi mail hàng loạt</h2><p>Gửi tới email đã thu thập ở trang /trial — dùng chung khuôn mẫu với mail OTP/KEY.</p></div>
+  <form id="broadcast-form" style="padding:14px 22px 22px;display:grid;gap:14px">
+    <label class="field"><span>Gửi tới</span>
+      <select class="input" name="target" id="broadcast-target">
+        <option value="all">Tất cả (<span id="count-all">0</span>)</option>
+        <option value="verified">Đã xác minh (<span id="count-verified">0</span>)</option>
+        <option value="unverified">Chưa xác minh (<span id="count-unverified">0</span>)</option>
+      </select>
+    </label>
+    <label class="field"><span>Tiêu đề</span><input class="input" name="subject" maxlength="150" required placeholder="Ví dụ: Suno Pro có bản cập nhật mới"></label>
+    <label class="field"><span>Nội dung</span><textarea class="input" name="body" rows="7" required placeholder="Viết nội dung mail… để trống 1 dòng để xuống đoạn mới."></textarea></label>
+    <label class="field"><span>Giãn cách giữa các email (giây)</span><input class="input" name="delaySeconds" type="number" min="0" max="120" step="1" value="2"></label>
+    <p class="sub">0 giây = gửi liên tục không nghỉ. Giãn cách chỉ là phòng ngừa tuỳ chọn (tránh Gmail để ý khi gửi quá nhanh với danh sách lớn), không bắt buộc. Trang admin phải để mở trong lúc gửi.</p>
+    <div class="d-actions" style="justify-content:space-between">
+      <button class="btn ghost" type="button" id="broadcast-preview-btn">Xem trước</button>
+      <div style="display:flex;gap:8px"><button class="btn ghost" type="button" id="broadcast-cancel">Hủy</button><button class="btn primary" type="submit" id="broadcast-send">Gửi hàng loạt</button></div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="broadcast-preview-dialog" style="width:min(560px, calc(100vw - 32px))">
+  <div class="d-head"><h2>Xem trước email</h2></div>
+  <div class="d-body">
+    <iframe id="broadcast-preview-frame" style="width:100%;height:420px;border:1px solid var(--line);border-radius:10px;background:#fff"></iframe>
+    <div class="d-actions"><button class="btn primary" id="broadcast-preview-close" type="button">Đóng</button></div>
+  </div>
+</dialog>
+
+<dialog id="broadcast-progress" style="width:min(420px, calc(100vw - 32px))">
+  <div class="d-head"><h2>Đang gửi mail…</h2><p id="broadcast-progress-sub"></p></div>
+  <div class="d-body">
+    <div class="term" style="padding:0"><div class="bar"><i id="broadcast-progress-bar" style="width:0%"></i></div></div>
+    <p class="sub" id="broadcast-progress-text" style="margin-top:10px"></p>
+    <div class="d-actions"><button class="btn primary" id="broadcast-progress-close" type="button" disabled>Đóng</button></div>
+  </div>
 </dialog>
 
 <dialog id="reveal">
@@ -397,6 +482,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
       loginView.hidden = true;
       appView.hidden = false;
       load();
+      loadTrialCode();
     } else {
       loginView.hidden = false;
       appView.hidden = true;
@@ -446,8 +532,10 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   }
   function visible() {
     const q = fold($("#search").value.trim());
+    const trialOnly = $("#trial-only").checked;
     const list = licenses.filter((l) => {
       if (filter !== "all" && status(l).key !== filter) return false;
+      if (trialOnly && !l.isTrial) return false;
       return !q || fold(l.name + " " + (l.note ?? "") + " " + l.keyHint + " " + (l.key ?? "") + " " + (l.deviceName ?? "")).includes(q);
     });
     const sorters = {
@@ -487,7 +575,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
       : '<span class="off">' + icon("laptop") + 'Chưa kích hoạt</span>';
     return '<tr data-id="' + esc(l.id) + '" class="' + (selectedId === l.id ? "selected" : "") + '">' +
       '<td><div class="who"><span class="avatar" style="background:' + hue(l.name) + '">' + esc(initials(l.name)) + '</span>' +
-        '<div style="min-width:0"><b>' + esc(l.name) + '</b>' + (l.note ? '<span class="sub" style="display:block;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(l.note) + '</span>' : '') + '</div></div></td>' +
+        '<div style="min-width:0"><b>' + esc(l.name) + (l.isTrial ? ' <span class="pill muted" style="height:17px;padding:0 6px;font-size:10px">Thử</span>' : '') + '</b>' + (l.note ? '<span class="sub" style="display:block;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(l.note) + '</span>' : '') + '</div></div></td>' +
       '<td>' + (l.email ? '<span class="mono" style="font-size:12.5px">' + esc(l.email) + '</span>' : '<span class="sub">—</span>') + '</td>' +
       '<td><span class="pill ' + s.tone + '">' + s.label + '</span></td>' +
       '<td><div class="term ' + t.cls + '">' + t.text + '<div class="bar"><i style="width:' + t.pct + '%"></i></div><span class="sub">' + t.sub + '</span></div></td>' +
@@ -593,9 +681,25 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   $("#refresh").innerHTML = icon("refresh") + '<span class="lbl">Làm mới</span>';
   $("#logout").innerHTML = icon("logout") + "Đăng xuất";
   $("#new-key").innerHTML = icon("plus") + "Tạo key";
+  $("#bulk-key").innerHTML = icon("plus") + "Tạo hàng loạt";
+  $("#cleanup-trial").innerHTML = icon("trash") + "Xoá trial hết hạn";
+  $("#view-leads").innerHTML = icon("users") + "Email đăng ký";
+  $("#broadcast-key").innerHTML = icon("refresh") + "Gửi mail hàng loạt";
+  $("#trial-code-save").innerHTML = icon("check") + "Lưu mã";
   $("#copy").innerHTML = icon("copy") + "Sao chép key";
 
+  async function loadTrialCode() {
+    try { const res = await apiFetch("/admin/trial-code"); $("#trial-code-input").value = res.code || ""; } catch { /* im lặng — không chặn trang chính */ }
+  }
+  $("#trial-code-save").addEventListener("click", async () => {
+    const code = $("#trial-code-input").value.trim();
+    if (!code) return toast("Nhập mã trước khi lưu.", "bad");
+    try { await apiFetch("/admin/trial-code", { method: "POST", body: JSON.stringify({ code }) }); toast("Đã lưu mã xác nhận Zalo"); }
+    catch (error) { toast(error.message, "bad"); }
+  });
+
   $("#tabs").addEventListener("click", (e) => { const tab = e.target.closest("[data-tab]"); if (!tab) return; filter = tab.dataset.tab; currentPage = 1; render(); });
+  $("#trial-only").addEventListener("change", () => { currentPage = 1; render(); });
   $("#search").addEventListener("input", () => { currentPage = 1; render(); });
   $("#sort").addEventListener("change", () => { currentPage = 1; render(); });
   $("#pagination").addEventListener("click", (e) => {
@@ -688,6 +792,137 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     setTimeout(() => ($("#copy").innerHTML = icon("copy") + "Sao chép key"), 1600);
   });
   $("#reveal-done").addEventListener("click", () => $("#reveal").close());
+
+  $("#bulk-key").addEventListener("click", () => { $("#bulk-create-form").reset(); $("#bulk-create").showModal(); });
+  $("#bulk-create").addEventListener("close", async () => {
+    if ($("#bulk-create").returnValue !== "ok") return;
+    const f = new FormData($("#bulk-create-form"));
+    const count = Number(f.get("count"));
+    if (!Number.isInteger(count) || count < 1 || count > 1000) return toast("Số lượng key phải từ 1 đến 1000.", "bad");
+    try {
+      const res = await apiFetch("/admin/licenses/bulk", { method: "POST", body: JSON.stringify({ count, days: 1, note: f.get("note") || undefined }) });
+      $("#bulk-count").textContent = res.count;
+      $("#bulk-keys").value = res.keys.map((k) => k.key).join("\\n");
+      $("#bulk-copy").innerHTML = icon("copy") + "Sao chép tất cả";
+      $("#bulk-download").innerHTML = icon("copy") + "Tải xuống .csv";
+      $("#bulk-reveal").showModal();
+      await load({ quiet: true });
+    } catch (error) { toast(error.message, "bad"); }
+  });
+  $("#bulk-copy").addEventListener("click", async () => {
+    await navigator.clipboard.writeText($("#bulk-keys").value);
+    toast("Đã sao chép " + $("#bulk-keys").value.split("\\n").filter(Boolean).length + " key");
+  });
+  $("#bulk-download").addEventListener("click", () => {
+    const rows = $("#bulk-keys").value.split("\\n").filter(Boolean);
+    const csv = "key\\n" + rows.join("\\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "suno-pro-trial-keys-" + Date.now() + ".csv"; a.click();
+    URL.revokeObjectURL(url);
+  });
+  $("#bulk-done").addEventListener("click", () => $("#bulk-reveal").close());
+
+  let leadsCache = [];
+  function renderLeads() {
+    $("#leads-rows").innerHTML = leadsCache.map((l) =>
+      '<tr><td>' + esc(l.name || "—") + '</td><td class="mono" style="font-size:12.5px">' + esc(l.email) + '</td>' +
+      '<td>' + dateTime(l.requestedAt) + '</td><td>' + (l.verifiedAt ? '<span class="pill ok">Đã xác minh</span>' : '<span class="pill muted">Chưa xác minh</span>') + '</td></tr>',
+    ).join("");
+    $("#leads-empty").hidden = leadsCache.length > 0;
+  }
+  $("#view-leads").addEventListener("click", async () => {
+    $("#leads-download").innerHTML = icon("copy") + "Tải xuống .csv";
+    $("#leads").showModal();
+    try {
+      leadsCache = (await apiFetch("/admin/trial-leads")).leads;
+      renderLeads();
+    } catch (error) { toast(error.message, "bad"); }
+  });
+  $("#leads-download").addEventListener("click", () => {
+    const rows = ["name,email,requested_at,verified_at"].concat(
+      leadsCache.map((l) => [l.name || "", l.email, dateTime(l.requestedAt), l.verifiedAt ? dateTime(l.verifiedAt) : ""].map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(",")),
+    );
+    const blob = new Blob([rows.join("\\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "suno-pro-trial-leads-" + Date.now() + ".csv"; a.click();
+    URL.revokeObjectURL(url);
+  });
+  $("#leads-done").addEventListener("click", () => $("#leads").close());
+
+  $("#broadcast-key").addEventListener("click", async () => {
+    $("#broadcast-form").reset();
+    $("#broadcast").showModal();
+    try {
+      const leads = (await apiFetch("/admin/trial-leads")).leads;
+      const verified = leads.filter((l) => l.verifiedAt).length;
+      $("#count-all").textContent = leads.length;
+      $("#count-verified").textContent = verified;
+      $("#count-unverified").textContent = leads.length - verified;
+    } catch { /* để mặc định 0, không chặn mở dialog */ }
+  });
+  $("#broadcast-cancel").addEventListener("click", () => $("#broadcast").close());
+  $("#broadcast-preview-btn").addEventListener("click", async () => {
+    const f = new FormData($("#broadcast-form"));
+    const subject = f.get("subject") || "(Chưa có tiêu đề)";
+    const body = f.get("body") || "";
+    try {
+      const res = await apiFetch("/admin/trial-leads/broadcast/preview", { method: "POST", body: JSON.stringify({ subject, body }) });
+      $("#broadcast-preview-frame").srcdoc = res.html;
+      $("#broadcast-preview-dialog").showModal();
+    } catch (error) { toast(error.message, "bad"); }
+  });
+  $("#broadcast-preview-close").addEventListener("click", () => $("#broadcast-preview-dialog").close());
+
+  let broadcastPoll = null;
+  function startBroadcastProgress(jobId, total) {
+    $("#broadcast-progress-sub").textContent = "Tổng " + total + " email";
+    $("#broadcast-progress-bar").style.width = "0%";
+    $("#broadcast-progress-text").textContent = "Đang gửi…";
+    $("#broadcast-progress-close").disabled = true;
+    $("#broadcast-progress").showModal();
+    clearInterval(broadcastPoll);
+    broadcastPoll = setInterval(async () => {
+      try {
+        const job = await apiFetch("/admin/trial-leads/broadcast/" + jobId);
+        const pct = job.total ? Math.round(((job.sent + job.failed) / job.total) * 100) : 0;
+        $("#broadcast-progress-bar").style.width = pct + "%";
+        $("#broadcast-progress-text").textContent = "Đã gửi " + job.sent + "/" + job.total + (job.failed ? " · lỗi " + job.failed : "");
+        if (job.status === "done") {
+          clearInterval(broadcastPoll);
+          $("#broadcast-progress-close").disabled = false;
+          toast("Đã gửi xong mail hàng loạt (" + job.sent + " thành công" + (job.failed ? ", " + job.failed + " lỗi" : "") + ")");
+        }
+      } catch (error) { clearInterval(broadcastPoll); $("#broadcast-progress-close").disabled = false; toast(error.message, "bad"); }
+    }, 1500);
+  }
+  $("#broadcast-progress-close").addEventListener("click", () => $("#broadcast-progress").close());
+  $("#broadcast-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = new FormData($("#broadcast-form"));
+    const subject = (f.get("subject") || "").trim();
+    const body = (f.get("body") || "").trim();
+    const target = f.get("target");
+    const delaySeconds = Number(f.get("delaySeconds"));
+    if (!subject || !body) return toast("Nhập đủ tiêu đề và nội dung.", "bad");
+    if (!confirm("Gửi mail này tới nhóm đã chọn? Không thể hủy giữa chừng.")) return;
+    try {
+      const res = await apiFetch("/admin/trial-leads/broadcast", { method: "POST", body: JSON.stringify({ subject, body, target, delaySeconds }) });
+      $("#broadcast").close();
+      startBroadcastProgress(res.id, res.total);
+    } catch (error) { toast(error.message, "bad"); }
+  });
+
+  $("#cleanup-trial").addEventListener("click", async () => {
+    if (!confirm("Xoá tất cả key dùng thử đã hết hạn? Không thể hoàn tác.")) return;
+    try {
+      const res = await apiFetch("/admin/licenses/trial/expired", { method: "DELETE" });
+      toast("Đã xoá " + res.deleted + " key dùng thử hết hạn");
+      await load({ quiet: true });
+    } catch (error) { toast(error.message, "bad"); }
+  });
 
   setInterval(() => document.visibilityState === "visible" && auth.currentUser && load({ quiet: true }), 30_000);
 })();
