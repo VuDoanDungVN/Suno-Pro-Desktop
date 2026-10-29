@@ -7,7 +7,7 @@
   "license": "ISC",
   "scripts": {
     "start": "electron .",
-    "package:mac": "electron-packager . \"Suno Pro\" --overwrite --platform=darwin --arch=arm64,x64 --icon=build/icon.icns --out=out --app-bundle-id=com.sunopro.app --prune=true --ignore=\"^/out($|/)\" --ignore=\"^/dist/assets/.*\\.map$\"",
+    "package:mac": "electron-packager . \"Suno Pro\" --overwrite --platform=darwin --arch=arm64,x64 --icon=build/icon.icns --out=out --app-bundle-id=com.sunopro.app --prune=true --asar --ignore=\"^/out($|/)\" --ignore=\"^/dist/assets/.*\\.map$\" --ignore=\"^/worker($|/)\" --ignore=\"^/docs($|/)\" --ignore=\"^/scripts($|/)\" --ignore=\"^/\\.git($|/)\" --ignore=\"^/README\\.md$\" --ignore=\"^/\\.gitignore$\"",
     "package:win": "node scripts/package-win.js && node scripts/set-win-icon.js",
     "package:all": "npm run package:mac && npm run package:win"
   },

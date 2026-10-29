@@ -1838,3 +1838,56 @@ body.sunopro-locked .suno-sub-toolbar {
   font-size: 11.5px;
   color: var(--text-secondary);
 }
+
+/* ── Màn hình "Tạo album đầu tiên": label "Tên Album :" giãn cách 10px với
+   ô input bên dưới, ô input rộng bằng nút "Tạo album và bắt đầu" (cùng
+   pattern width:100% đã dùng cho ô Key kích hoạt ở #sunoProLicenseForm),
+   và dãy màu nhận diện căn giữa thay vì dồn về mép trái. ────────────── */
+label[for="albumFirstRunName"] {
+  margin-bottom: 10px;
+}
+#albumFirstRunName {
+  width: 100%;
+}
+#albumFirstRunColors {
+  justify-content: center;
+}
+
+/* ── Popup "Upload hoàn thành" (#uploadConfirmModal, setProcessDone trong
+   index.html): câu trạng thái chính tách riêng khỏi câu hỏi phụ, và khối
+   tên bài hát + tổng thời gian đưa vào 1 khung riêng, căn trái, để không
+   bị ngắt dòng lởm chởm khi tên bài hát dài (giờ có dạng "Album - Tên
+   file"). ──────────────────────────────────────────────────────────── */
+.suno-done-headline {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.suno-done-question {
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+#uploadConfirmTimer {
+  margin: 10px 0 14px;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-align: left;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.suno-done-timer-song {
+  color: var(--text-primary);
+  font-size: 11.5px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.suno-done-timer-time {
+  margin-top: 4px;
+  color: var(--text-secondary);
+}

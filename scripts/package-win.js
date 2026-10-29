@@ -39,7 +39,21 @@ async function main() {
       arch: 'x64',
       overwrite: true,
       prune: true,
-      ignore: [/^\/out($|\/)/, /^\/dist\/assets\/.*\.map$/]
+      asar: true,
+      // Không đóng gói kèm source Worker (worker/ — toàn bộ "recipe" gọi Suno,
+      // logic license/admin), tài liệu nội bộ (docs/), script build (scripts/),
+      // hay metadata git — tất cả chỉ cần trên máy dev, không cần (và không
+      // được) nằm trong bản phát hành cho khách.
+      ignore: [
+        /^\/out($|\/)/,
+        /^\/dist\/assets\/.*\.map$/,
+        /^\/worker($|\/)/,
+        /^\/docs($|\/)/,
+        /^\/scripts($|\/)/,
+        /^\/\.git($|\/)/,
+        /^\/README\.md$/,
+        /^\/\.gitignore$/
+      ]
     });
   } finally {
     fs.writeFileSync(pkgPath, originalText);
