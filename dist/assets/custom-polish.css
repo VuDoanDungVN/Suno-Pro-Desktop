@@ -1366,6 +1366,30 @@ body.sunopro-locked .suno-sub-toolbar {
 #sunoProLicenseKeyInput {
   width: 100%;
 }
+/* ── Suno login gate (chèn sau màn Key, trước màn Album) ──────────────────
+   Cùng kiểu khoá-mặc-định như .sunopro-locked ở trên: body có sẵn class này
+   ngay từ HTML (tránh chớp hình Albums gate/main trước khi biết có cần đăng
+   nhập lại hay không), JS chỉ gỡ ra khi xác nhận đã có session Suno hợp lệ
+   (sunoVerify OK) hoặc vừa đăng nhập xong trong #sunoLoginGate. */
+body.suno-login-locked #albumsGateOverlay,
+body.suno-login-locked .main-content {
+  display: none !important;
+}
+body.suno-login-locked .suno-sub-toolbar {
+  display: none !important;
+}
+#sunoLoginGate[hidden] {
+  display: none !important;
+}
+#sunoLoginGate {
+  top: 48px;
+}
+#sunoLoginGate .albums-gate-inner {
+  min-height: calc(100vh - 48px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 /* Key kích hoạt hiển thị dạng 4 ô, mỗi ô chứa 4 ký tự (1 ô = 1 nhóm trong
    SP-XXXX-XXXX-XXXX-XXXX) — "SP" cố định, không phải ô nhập. Dán cả KEY vào
    1 ô bất kỳ sẽ tự rải đúng 4 ký tự vào từng ô còn lại (xem JS). */
@@ -1870,6 +1894,16 @@ label[for="albumFirstRunName"] {
   color: var(--text-secondary);
   line-height: 1.5;
 }
+/* Dòng đếm giờ khi đang xử lý (loading) — nằm NGAY dưới
+   #uploadConfirmMsg, căn giữa, không khung/viền (khác #uploadConfirmTimer
+   bên dưới — cái đó giờ dùng để hiện tên bài khi đang chạy, hoặc tên bài +
+   tổng thời gian khi xong). */
+.suno-run-timer {
+  margin: 0 0 10px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
 #uploadConfirmTimer {
   margin: 10px 0 14px;
   padding: 8px 10px;
@@ -1880,6 +1914,14 @@ label[for="albumFirstRunName"] {
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-secondary);
+}
+/* Khi đang chạy (loading), #uploadConfirmTimer chỉ hiện tên bài — ép 1
+   dòng, quá dài thì cắt bớt kèm "…" thay vì tự xuống dòng/tràn khung. */
+#uploadConfirmTimer.suno-timer-songname {
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .suno-done-timer-song {
   color: var(--text-primary);

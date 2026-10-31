@@ -211,6 +211,21 @@ export async function activate(request: Request, env: Env): Promise<Response> {
   if (row.device_id && row.device_id !== deviceId) {
     throw new HttpError(409, "key_in_use", "Key đang được dùng trên một máy khác. Liên hệ người bán để chuyển thiết bị.");
   }
+  // Vá lỗ hổng "đổi email lấy KEY dùng thử liên tục": mã Zalo dùng chung + OTP chỉ xác minh
+  // email thật chứ không ngăn 1 người tạo nhiều email khác nhau, nên việc chặn phải nằm ở bước
+  // kích hoạt — mỗi THIẾT BỊ chỉ được kích hoạt 1 KEY dùng thử, bất kể đã xin bao nhiêu KEY dùng
+  // thử khác nhau. Chỉ áp dụng khi key này CHƯA từng gắn thiết bị (is_trial, device_id null) —
+  // kích hoạt lại đúng key cũ trên đúng máy cũ (trường hợp ở nhánh trên) không bị ảnh hưởng.
+  if (row.is_trial && !row.device_id) {
+    const otherTrial = await env.DB.prepare(
+      "SELECT id FROM licenses WHERE is_trial = 1 AND device_id = ? AND id != ? LIMIT 1",
+    )
+      .bind(deviceId, row.id)
+      .first<{ id: string }>();
+    if (otherTrial) {
+      throw new HttpError(409, "trial_already_used", "Máy này đã dùng thử Suno Pro rồi — mỗi thiết bị chỉ được dùng thử 1 lần. Hãy mua Key chính thức để tiếp tục.");
+    }
+  }
   const deviceName = cleanText(body.deviceName, 80);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM sessions WHERE license_id = ?").bind(row.id),
@@ -478,6 +493,26 @@ export async function createTrialLicense(env: Env, name: string, email: string, 
   return { key, license: licenseView(await getLicense(env, id)) };
 }
 
+/** Cấp 1 KEY trả phí (không phải dùng thử) — dùng cho luồng mua KEY qua Stripe (`stripe.ts`).
+ * `days: null` = vĩnh viễn. Không tự gửi email ở đây — nơi gọi (webhook Stripe) tự lo gửi bằng
+ * khuôn mẫu email đã có sẵn, để đồng bộ giao diện với OTP/KEY dùng thử. */
+export async function issueLicense(
+  env: Env,
+  opts: { name: string; email: string; note?: string | null; days: number | null },
+): Promise<{ id: string; key: string }> {
+  const durationMs = opts.days === null ? null : opts.days * DAY_MS;
+  const { key, hash, hint, enc } = await newKey(env);
+  const id = crypto.randomUUID();
+  const t = now();
+  await env.DB.prepare(
+    `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+  )
+    .bind(id, hash, hint, enc, opts.name, opts.email, opts.note ?? null, durationMs === null ? null : t + durationMs, t, t)
+    .run();
+  return { id, key };
+}
+
 /** Email này đã từng nhận key dùng thử chưa — chặn 1 người xin nhiều lần. */
 export async function hasClaimedTrial(env: Env, email: string): Promise<boolean> {
   const row = await env.DB.prepare("SELECT id FROM licenses WHERE is_trial = 1 AND email = ? LIMIT 1").bind(email).first<{ id: string }>();
@@ -527,6 +562,28 @@ export async function adminSetTrialCode(request: Request, env: Env): Promise<Res
   if (!code) throw new HttpError(400, "bad_code", "Mã không hợp lệ.");
   await metaSet(env, "trial_zalo_code", code);
   return json({ ok: true, code });
+}
+
+/** `GET /admin/download-url` — 2 link Google Drive (Windows/macOS) hiện đang hiển thị ở 2 nút tải
+ * app trên /huong-dan. Đọc cả key cũ "app_download_url" (trước khi tách Windows/macOS) làm phòng
+ * hờ cho link Windows, để không mất cấu hình nếu đã từng lưu qua endpoint cũ. */
+export async function adminGetDownloadUrl(env: Env): Promise<Response> {
+  const win = (await metaGet(env, "app_download_url_win")) ?? (await metaGet(env, "app_download_url"));
+  const mac = await metaGet(env, "app_download_url_mac");
+  return json({ win: win ?? null, mac: mac ?? null });
+}
+
+/** `POST /admin/download-url { platform: "win" | "mac", url }` — đổi link tải app cho từng hệ điều
+ * hành (vd. mỗi lần ra bản mới) mà KHÔNG cần sửa code/deploy lại Worker — trang /huong-dan đọc
+ * link này trực tiếp từ bảng `meta` mỗi lần có người tải trang, nên đổi ở đây là có hiệu lực ngay. */
+export async function adminSetDownloadUrl(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<{ platform?: unknown; url?: unknown }>(request);
+  const platform = body.platform === "mac" ? "mac" : body.platform === "win" ? "win" : null;
+  if (!platform) throw new HttpError(400, "bad_platform", "platform phải là \"win\" hoặc \"mac\".");
+  const url = cleanText(body.url, 500);
+  if (!url || !/^https?:\/\//i.test(url)) throw new HttpError(400, "bad_url", "Link không hợp lệ (phải bắt đầu bằng http(s)://).");
+  await metaSet(env, `app_download_url_${platform}`, url);
+  return json({ ok: true, platform, url });
 }
 
 /** `PATCH /admin/licenses/:id { name?, email?, note?, status?, expiresAt?, extendDays? }`

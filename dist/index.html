@@ -12,12 +12,13 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:5173; script-src 'self' 'unsafe-inline' http://localhost:5173; style-src 'self' 'unsafe-inline'; media-src 'self' file: blob:; img-src 'self' data: https:; connect-src 'self' ws://localhost:5173 http://localhost:5173">
   <title>Suno Pro</title>
   <script type="module" crossorigin src="./assets/main-9QM-JpB-.js"></script>
+  <script defer src="./assets/suno-fix-rejected.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/main-CtjhM9ST.css">
   <link rel="stylesheet" href="./assets/custom-polish.css">
   <!-- TEMP: ẩn popup activation để test, nhớ xóa trước khi build release -->
   <style>#activationOverlay{display:none !important;}</style>
 </head>
-<body class="sunopro-locked">
+<body class="sunopro-locked suno-login-locked">
   <!-- Suno Pro Worker license gate — separate from the offline activation
        below. Locked by default (class on <body>, no flash of Albums/main
        content); JS below removes it only after a Worker-confirmed license. -->
@@ -36,7 +37,28 @@
           <input type="hidden" id="sunoProLicenseKeyInput">
           <div id="sunoProLicenseError" class="suno-status err" hidden></div>
           <button id="sunoProLicenseSubmit" class="suno-connect-btn suno-full-width-btn" type="button" style="margin-top:16px;">Kích hoạt</button>
+          <button id="sunoProBuyKeyBtn" class="suno-test-btn suno-btn-ghost suno-full-width-btn" type="button" style="margin-top:8px;" title="Mở trang mua KEY trong trình duyệt">💳 Mua KEY</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Suno login gate — chèn SAU màn xác minh Key, TRƯỚC màn Album. Bắt buộc
+       đăng nhập Suno (không có nút "Để sau") thì mới vào được màn Tạo/chọn
+       Album. Dùng lại nguyên cơ chế "Đăng nhập trong app" (sunoConnect) đã có
+       sẵn trong popup Cấu hình & đăng nhập (#sunoSettingsModal) — popup đó
+       giữ nguyên, không đụng tới. Session đăng nhập được main.js tự lưu lại
+       (suno-session.json) nên lần mở app sau chỉ phải đăng nhập lại nếu
+       session đã hết hạn (sunoVerify thất bại) — xem script cuối file. -->
+  <div id="sunoLoginGate" class="albums-gate" hidden>
+    <div class="albums-gate-inner">
+      <div class="albums-firstrun">
+        <div class="albums-firstrun-icon" aria-hidden="true">🔐</div>
+        <h2>Đăng nhập Suno</h2>
+        <p id="sunoLoginGateIntro">Đăng nhập tài khoản Suno để tiếp tục — session sẽ được lưu lại, lần sau không cần đăng nhập lại trừ khi hết hạn.</p>
+        <div id="sunoLoginGateError" class="suno-status err" hidden></div>
+        <button id="sunoLoginGateBtn" class="suno-connect-btn suno-full-width-btn" type="button" style="margin-top:16px;">Đăng nhập Suno</button>
+        <p id="sunoLoginGateHint" class="suno-status" style="margin-top:10px;" hidden>Đang chờ bạn đăng nhập trong cửa sổ vừa mở… đăng nhập xong app tự nhận, không cần bấm gì thêm.</p>
       </div>
     </div>
   </div>
@@ -250,7 +272,11 @@
     #logViewerContent {
       max-height: 62vh; overflow: auto; background: #14161a; padding: 6px; border-radius: 10px;
       margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      font-size: 12.5px; line-height: 1.5;
+      font-size: 11px; line-height: 1.45;
+      /* Toàn app mặc định user-select:none (xem main-*.css) để trông giống
+         app hơn là trang web — riêng khung log này cần bôi đen/copy được,
+         nên bật lại tường minh ở đây (chỉ áp dụng trong #logViewerContent). */
+      -webkit-user-select: text; user-select: text; cursor: text;
     }
     #logViewerContent .sp-log-empty { color: #8a909b; padding: 10px 8px; }
     #logViewerContent .sp-log-row {
@@ -259,11 +285,11 @@
     }
     #logViewerContent .sp-log-row.sp-log-odd { background: rgba(255,255,255,.03); }
     #logViewerContent .sp-log-time {
-      flex: 0 0 auto; min-width: 48px; padding-top: 1px; color: #7a8290; font-size: 11px;
+      flex: 0 0 auto; min-width: 44px; padding-top: 1px; color: #7a8290; font-size: 9.5px;
       font-variant-numeric: tabular-nums; white-space: nowrap;
     }
     #logViewerContent .sp-log-part {
-      flex: 0 0 auto; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+      flex: 0 0 auto; font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
       background: rgba(255,255,255,.08); color: #c7cbd3; white-space: nowrap;
     }
     #logViewerContent .sp-log-icon { flex: 0 0 auto; width: 14px; text-align: center; padding-top: 1px; }
@@ -292,6 +318,15 @@
           <label style="display:flex;align-items:center;gap:6px;margin-left:auto;font-size:13px;white-space:nowrap;">
             <input type="checkbox" id="logViewerAutoRefresh" checked> Tự làm mới
           </label>
+        </div>
+        <!-- Tab lọc: "Tất cả" vs "Chỉ lỗi" — người dùng chỉ cần xem dòng nào
+             thật sự lỗi mà không phải lướt qua cả log dài. Số trong ngoặc ở
+             tab "Chỉ lỗi" tự cập nhật mỗi lần render (xem renderText bên
+             dưới), không cần làm mới thủ công. -->
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button id="logViewerTabAllBtn" class="suno-connect-btn" type="button" style="flex:1;">Tất cả</button>
+          <button id="logViewerTabErrBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;">⚠ Chỉ lỗi<span id="logViewerErrCount"></span></button>
+          <button id="logViewerTabQueueBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;">📋 Hàng chờ<span id="logViewerQueueCount"></span></button>
         </div>
         <div id="logViewerContent">Đang tải…</div>
       </div>
@@ -1096,8 +1131,8 @@
                 <span>Auto-upload sau khi master</span>
               </label>
             </div>
-            <label class="field-label-sm" for="sunoSplitSecs">Số frame (số giây xử lý mỗi đoạn)</label>
-            <input type="number" id="sunoSplitSecs" class="suno-seconds-input suno-prep-secs-input" min="2" max="30" step="1" value="4" aria-label="Số giây mỗi đoạn">
+            <label class="field-label-sm" for="sunoSplitSecs">Số giây mỗi đoạn</label>
+            <input type="text" id="sunoSplitSecs" class="suno-seconds-input suno-prep-secs-input" value="8-10 (ngẫu nhiên)" readonly aria-label="Số giây mỗi đoạn — ngẫu nhiên 8 đến 10 giây, không cố định" title="Mỗi đoạn được chọn ngẫu nhiên 8, 9 hoặc 10 giây — giảm số lượng đoạn so với 4s cố định trước đây, giúp giảm số lần chạm giới hạn tốc độ của Suno.">
             <span class="step-tag step-tag-alt">Cách khác (thủ công)</span>
             <div class="suno-panel-row">
               <button id="sunoOpenLogin" class="suno-test-btn suno-btn-ghost" title="Mở trình duyệt đã chọn (đúng profile) lên trang Suno để bạn đăng nhập bằng tay, rồi bấm lại nút Tự lấy session">Mở trình duyệt login</button>
@@ -1201,6 +1236,7 @@
         <div class="cm-modal-body" style="text-align:center;">
           <div id="uploadConfirmSpinner" class="cm-spinner" aria-hidden="true" style="margin:0 auto;" hidden></div>
           <div id="uploadConfirmMsg" class="suno-status" style="margin:10px 0 6px;"></div>
+          <div id="uploadConfirmRunTimer" class="suno-run-timer" hidden></div>
           <div id="uploadConfirmTimer" hidden></div>
           <div id="uploadConfirmActions" class="suno-split-step-row" style="gap:8px;" hidden>
             <!-- Tự động upload ngay sau khi cắt xong (xem startAutoUpload) —
@@ -1211,7 +1247,7 @@
                  thủ công khi pipeline tự động bị kẹt (không tự chuyển bước dù
                  các part đã upload xong), bấm hộ đúng nút #sunoSplitAssemble
                  (ẩn) thay vì phải mở DevTools gõ lệnh tay. -->
-            <button id="uploadConfirmForceAssembleBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;" title="Dùng khi tiến trình bị kẹt lâu dù các part đã upload xong" hidden>🔁 Ghép lại</button>
+            <button id="uploadConfirmForceAssembleBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;" title="Dùng khi tiến trình bị kẹt lâu dù các bài phụ đã upload xong" hidden>🔁 Ghép lại</button>
             <button id="uploadConfirmNoBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;">Loại bỏ</button>
           </div>
           <!-- Hiện khi cả chuỗi (Upload → Ghép → Xuất) đã xong hẳn — thay cho
@@ -1288,6 +1324,9 @@
                 <button id="genLyricsExpandBtn" class="gen-field-icon-btn" type="button" title="Mở rộng ô nhập">⤢</button>
               </div>
             </div>
+            <label style="display:flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;" title="Tự động thêm 1 đoạn ký tự đệm vô hình vào cuối lời bài hát khi gửi lên Suno (không hiện trong ô nhập).">
+              <input type="checkbox" id="genPaddingChk"> <span style="font-size:12px;">Xử lý Lyrics </span>
+            </label>
 
             <!-- "Lưu" chỉ hiện khi ô Phong cách có chữ — lưu vào file local
                  qua IPC (gen-style-presets.json, xem main.js) để dùng lại ở
@@ -1408,7 +1447,12 @@
 
             <div id="ytSingleMode">
               <div class="suno-panel-row">
-                <input type="text" id="ytLinkInput" class="suno-session-input" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" spellcheck="false" aria-label="YouTube link">
+                <div class="gen-field-wrap" style="flex:1;">
+                  <input type="text" id="ytLinkInput" class="suno-session-input gen-full-width" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" spellcheck="false" aria-label="YouTube link">
+                  <div class="gen-field-icons gen-field-icons-mid">
+                    <button id="ytLinkPasteBtn" class="gen-field-icon-btn" type="button" title="Dán từ clipboard">📋</button>
+                  </div>
+                </div>
               </div>
               <div id="ytInfoBox" class="suno-yt-info hidden">
                 <img id="ytThumbPreview" class="suno-yt-thumb" alt="">
@@ -1644,9 +1688,49 @@
         var openFolderBtn = document.getElementById('logViewerOpenFolderBtn');
         var clearBtn = document.getElementById('logViewerClearBtn');
         var autoRefreshBox = document.getElementById('logViewerAutoRefresh');
+        var tabAllBtn = document.getElementById('logViewerTabAllBtn');
+        var tabErrBtn = document.getElementById('logViewerTabErrBtn');
+        var errCountEl = document.getElementById('logViewerErrCount');
+        var tabQueueBtn = document.getElementById('logViewerTabQueueBtn');
+        var queueCountEl = document.getElementById('logViewerQueueCount');
         if (!modal || !content) return;
         var timer = null;
         var lastText = '';
+        var filterMode = 'all'; // 'all' | 'error' | 'queue' — xem setFilterMode() bên dưới
+        function setFilterMode(mode) {
+          filterMode = mode;
+          if (tabAllBtn) tabAllBtn.className = mode === 'all' ? 'suno-connect-btn' : 'suno-test-btn suno-btn-ghost';
+          if (tabErrBtn) tabErrBtn.className = mode === 'error' ? 'suno-connect-btn' : 'suno-test-btn suno-btn-ghost';
+          if (tabQueueBtn) tabQueueBtn.className = mode === 'queue' ? 'suno-connect-btn' : 'suno-test-btn suno-btn-ghost';
+          renderText(lastText);
+        }
+        if (tabAllBtn) tabAllBtn.addEventListener('click', function () { setFilterMode('all'); });
+        if (tabErrBtn) tabErrBtn.addEventListener('click', function () { setFilterMode('error'); });
+        if (tabQueueBtn) tabQueueBtn.addEventListener('click', function () { setFilterMode('queue'); });
+        // "Hàng chờ" không đọc debug.log — đọc trực tiếp danh sách luồng hiện
+        // tại của bundle (window.sunoSplitPartsSnapshot, tự cập nhật mỗi khi
+        // 1 luồng đổi trạng thái — xem kn() trong main-*.js), nên luôn khớp
+        // đúng thời điểm chứ không lệch theo nhịp đọc file debug.log.
+        function renderQueueView(parts) {
+          var atBottom = (content.scrollTop + content.clientHeight) >= (content.scrollHeight - 40);
+          var waiting = parts.filter(function (p) { return p.status === 'queued'; })
+            .sort(function (a, b) { return a.number - b.number; });
+          if (!waiting.length) {
+            content.innerHTML = '<div class="sp-log-empty">' +
+              (parts.length ? '✅ Không còn luồng nào đang chờ.' : '(chưa có luồng nào — hãy bắt đầu upload)') + '</div>';
+            return;
+          }
+          content.innerHTML = waiting.map(function (p, idx) {
+            var cls = 'sp-log-row sp-log-row--muted' + (idx % 2 ? ' sp-log-odd' : '');
+            var dur = Number.isFinite(p.durationSec) ? ' (' + p.durationSec.toFixed(1) + 's)' : '';
+            return '<div class="' + cls + '">' +
+              '<span class="sp-log-part">Luồng ' + p.number + '</span>' +
+              '<span class="sp-log-icon">⏳</span>' +
+              '<span class="sp-log-msg">Đang chờ xử lý' + dur + '</span>' +
+              '</div>';
+          }).join('');
+          if (atBottom) content.scrollTop = content.scrollHeight;
+        }
 
         function escapeHtml(s) {
           return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -1683,10 +1767,48 @@
           // nội dung thật ghi trong debug.log. Khớp mẫu cụ thể trước, mẫu
           // nào không khớp thì chỉ đồng bộ "part N" → "Dữ liệu N" như cũ.
           var friendly = null;
+          var mCutDoneRandom = /^đã cắt xong,\s*số parts=(\d+)\s*giây mỗi part=8-10 ngẫu nhiên/i.exec(rest);
+          var mCutDone = /^đã cắt xong,\s*số parts=(\d+)\s*giây mỗi part=([\d.]+)/i.exec(rest);
+          var mPartStart = /^part\s+(\d+)\s*▶\s*bắt đầu xử lý\s*—\s*([\d.]+)s/i.exec(rest);
           var mDone = /✅\s*HOÀN TẤT\s*—\s*(\d+)\s*clip,\s*tổng\s*[\d.]+s(.*)$/i.exec(rest);
+          var mLost = /✗\s*LỖI:\s*Thiếu\s*([\d.]+)s trong bài hoàn chỉnh/i.exec(rest);
+          var mPriorityStart = /⚠\s*còn\s*(\d+)\s*đoạn bị Suno từ chối.*ưu tiên thử lại/i.exec(rest);
+          var mPriorityRound = /🔁\s*vòng ưu tiên\s*(\d+)\/3\s*cho\s*(\d+)\s*đoạn/i.exec(rest);
+          var mPriorityDone = /✅\s*đã lấy lại được toàn bộ đoạn sau khi ưu tiên/i.test(rest);
+          var mPriorityGiveUp = /⚠\s*sau 3 lần ưu tiên vẫn còn\s*(\d+)\s*đoạn không tải lên được/i.exec(rest);
+          var mShrinkRetry = /✂️\s*Đoạn\s*[\d.]+s hơi khó, chia nhỏ còn\s*[\d.]+s để thử tiếp/i.test(rest);
+          var mRateRetry = /⏸\s*(?:\(chế độ cũ\)\s*)?bị giới hạn tốc độ \(lần\s*(\d+)\/8\)/i.exec(rest);
+          var mRateGiveUp = /⏸\s*(?:\(chế độ cũ\)\s*)?vẫn bị giới hạn tốc độ sau 8 lần/i.test(rest);
+          var mHttp429 = /✗\s*(?:\(chế độ cũ[^)]*\)\s*)?LỖI:.*\b429\b/i.test(rest);
           var mErr = /✗\s*LỖI:/i.test(rest) && /suno.{0,4}từ chối/i.test(rest);
-          if (mDone) {
+          if (mCutDoneRandom) {
+            friendly = 'Đã đo luồng xong, số luồng là : ' + mCutDoneRandom[1] + ' , mỗi luồng là : 8-10 (ngẫu nhiên)';
+          } else if (mCutDone) {
+            friendly = 'Đã đo luồng xong, số luồng là : ' + mCutDone[1] + ' , mỗi luồng là : ' + mCutDone[2];
+          } else if (mPartStart) {
+            friendly = 'Luồng ' + mPartStart[1] + ' - Bắt đầu tiến trình xử lý - mỗi luồng là : ' + Number(mPartStart[2]);
+          } else if (mDone) {
             friendly = 'Hoàn tất - ' + mDone[1] + ' Clip' + (mDone[2] || '');
+          } else if (mLost && partNum) {
+            friendly = 'Dữ liệu ' + partNum + ' - Thiếu ' + mLost[1] + ' giây, Suno từ chối dù đã thử nhiều cách kể cả ưu tiên thử lại riêng';
+          } else if (mPriorityStart && partNum) {
+            friendly = 'Dữ liệu ' + partNum + ' - Có ' + mPriorityStart[1] + ' đoạn khó, tạm dừng phần khác để ưu tiên thử lại';
+          } else if (mPriorityRound && partNum) {
+            friendly = 'Dữ liệu ' + partNum + ' - Đang ưu tiên thử lại, lần ' + mPriorityRound[1] + '/3';
+          } else if (mPriorityDone && partNum) {
+            friendly = 'Dữ liệu ' + partNum + ' - Đã lấy lại được đoạn bị thiếu, tiếp tục bình thường';
+          } else if (mPriorityGiveUp && partNum) {
+            friendly = 'Dữ liệu ' + partNum + ' - Vẫn còn ' + mPriorityGiveUp[1] + ' đoạn không lấy lại được, đành bỏ qua';
+          } else if (mShrinkRetry && partNum) {
+            friendly = 'Dữ liệu ' + partNum + ' - Đang thử phân lại luồng để thử tiếp…';
+          } else if (mRateRetry && partNum) {
+            friendly = 'Luồng ' + partNum + ' - Bị giới hạn tốc độ, đang xếp lại để thử lại (lần ' + mRateRetry[1] + '/8)';
+          } else if (mRateGiveUp && partNum) {
+            friendly = 'Luồng ' + partNum + ' - Vẫn bị giới hạn tốc độ sau nhiều lần thử lại, đành đánh dấu lỗi';
+          } else if (mHttp429 && partNum) {
+            friendly = 'Luồng ' + partNum + ' - Lỗi: Bị giới hạn tốc độ (quá nhiều yêu cầu cùng lúc)';
+          } else if (/✅\s*\(ưu tiên\)\s*tải lên OK/i.test(rest) && partNum) {
+            friendly = 'Dữ liệu ' + partNum + ' - Thử lại ưu tiên thành công 1 đoạn';
           } else if (/✅\s*mảnh tải lên OK/i.test(rest) && partNum) {
             friendly = 'Tải lên thành công dữ liệu ' + partNum;
           } else if (/▶\s*bắt đầu\s*—\s*cỡ gốc/i.test(rest) && partNum) {
@@ -1703,14 +1825,24 @@
           return { time: time, partNum: partNum, kind: kind, icon: icon, text: rest };
         }
         function renderText(text) {
+          // Badge đếm số luồng đang chờ — cập nhật mỗi lần render bất kể tab
+          // nào đang mở, để con số luôn đúng ngay cả khi đang xem "Tất cả".
+          var queueParts = Array.isArray(window.sunoSplitPartsSnapshot) ? window.sunoSplitPartsSnapshot : [];
+          var waitingCount = queueParts.filter(function (p) { return p.status === 'queued'; }).length;
+          if (queueCountEl) queueCountEl.textContent = waitingCount ? ' (' + waitingCount + ')' : '';
+          if (filterMode === 'queue') { renderQueueView(queueParts); return; }
           var atBottom = (content.scrollTop + content.clientHeight) >= (content.scrollHeight - 40);
           var lines = String(text || '').split(/\r?\n/).filter(function (l) { return l.trim().length > 0; });
-          if (!lines.length) {
-            content.innerHTML = '<div class="sp-log-empty">(chưa có log nào)</div>';
+          var rows = lines.map(parseLogLine);
+          var errRows = rows.filter(function (r) { return r.kind === 'error'; });
+          if (errCountEl) errCountEl.textContent = errRows.length ? ' (' + errRows.length + ')' : '';
+          var visibleRows = filterMode === 'error' ? errRows : rows;
+          if (!visibleRows.length) {
+            content.innerHTML = '<div class="sp-log-empty">' +
+              (filterMode === 'error' ? '✅ Chưa có lỗi nào.' : '(chưa có log nào)') + '</div>';
             return;
           }
-          content.innerHTML = lines.map(function (line, idx) {
-            var row = parseLogLine(line);
+          content.innerHTML = visibleRows.map(function (row, idx) {
             var cls = 'sp-log-row sp-log-row--' + row.kind + (idx % 2 ? ' sp-log-odd' : '');
             return '<div class="' + cls + '">' +
               (row.time ? '<span class="sp-log-time">' + row.time + '</span>' : '') +
@@ -1744,15 +1876,28 @@
         function open() { modal.classList.remove('hidden'); load(); startAuto(); }
         function close() { modal.classList.add('hidden'); stopAuto(); }
         window.sunoCloseLogViewer = close;
+        // Mỗi lần bắt đầu 1 bài mới (Import/YouTube/hàng đợi — xem
+        // window.__sunoLogNeedsClear ở 3 chỗ phía trên), lần đầu mở popup
+        // này sau đó sẽ tự xoá log cũ trước khi hiện, để không còn lẫn log
+        // của bài trước — chỉ xoá ĐÚNG 1 LẦN cho tới khi có bài mới tiếp
+        // theo (mở lại nhiều lần trong cùng 1 bài không bị xoá giữa chừng).
+        function openAutoClearIfNeeded() {
+          if (window.__sunoLogNeedsClear && window.electronAPI && typeof window.electronAPI.debugLogClear === 'function') {
+            window.__sunoLogNeedsClear = false;
+            window.electronAPI.debugLogClear().then(open).catch(open);
+          } else {
+            open();
+          }
+        }
         // Mở từ popup tiến trình (icon 🪵 trên popup Upload/Ghép/Xuất) — chỉ
         // MỞ THÊM popup log đè lên trên (z-index cao hơn), tuyệt đối không
         // đụng tới uploadConfirmModal bên dưới (không đóng, không reset
         // trạng thái, không ảnh hưởng tiến trình thật đang chạy).
-        window.sunoOpenLogViewer = open;
+        window.sunoOpenLogViewer = openAutoClearIfNeeded;
         var processLogBtn = document.getElementById('uploadConfirmLogBtn');
-        if (processLogBtn) processLogBtn.addEventListener('click', function (ev) { ev.stopPropagation(); open(); });
+        if (processLogBtn) processLogBtn.addEventListener('click', function (ev) { ev.stopPropagation(); openAutoClearIfNeeded(); });
 
-        if (menuBtn) menuBtn.addEventListener('click', function () { if (typeof closeDropdown === 'function') closeDropdown(); open(); });
+        if (menuBtn) menuBtn.addEventListener('click', function () { if (typeof closeDropdown === 'function') closeDropdown(); openAutoClearIfNeeded(); });
         if (closeBtn) closeBtn.addEventListener('click', close);
         if (refreshBtn) refreshBtn.addEventListener('click', load);
         if (copyBtn) copyBtn.addEventListener('click', function () {
@@ -2159,6 +2304,7 @@
       var uploadConfirmDownloadBtn = document.getElementById('uploadConfirmDownloadBtn');
       var uploadConfirmNewBtn = document.getElementById('uploadConfirmNewBtn');
       var uploadConfirmTimer = document.getElementById('uploadConfirmTimer');
+      var uploadConfirmRunTimer = document.getElementById('uploadConfirmRunTimer');
       var pendingAutoStage = null; // 'afterCut' | 'afterUpload' | 'afterAssemble' | 'afterExport'
       var userCancelledCurrentRun = false; // true nếu bấm "Loại bỏ" khi đang dọn dẹp — tránh popup tự mở lại
       // Độ dài bài (giây) — lấy từ chính dòng text bundle gốc in ra sau khi
@@ -2186,6 +2332,7 @@
       var genLyricsInput = document.getElementById('genLyricsInput');
       var genLyricsPasteBtn = document.getElementById('genLyricsPasteBtn');
       var genLyricsExpandBtn = document.getElementById('genLyricsExpandBtn');
+      var genPaddingChk = document.getElementById('genPaddingChk');
       var genStyleInput = document.getElementById('genStyleInput');
       var genStylePasteBtn = document.getElementById('genStylePasteBtn');
       var genStyleSaveBtn = document.getElementById('genStyleSaveBtn');
@@ -2505,10 +2652,26 @@
             return;
           }
           genErrorBox.hidden = true;
+          // "Xử lý Lyrics": chỉ thêm vào chuỗi GỬI LÊN SUNO (promptForSuno), không đụng tới
+          // genLyricsInput.value — nên ô Lời bài hát trên UI không bao giờ hiện đoạn đệm này.
+          // Suno giới hạn tối đa 5000 ký tự — luôn chừa đúng 1 ký tự an toàn, nên TỔNG (lời bài hát
+          // + dấu xuống dòng + đệm) không bao giờ vượt quá 4999 ký tự, bất kể lời bài hát dài/ngắn
+          // thế nào (đệm chỉ lấp đúng phần còn trống, không cộng thêm cố định 4000 ký tự như trước).
+          var promptForSuno = lyrics;
+          if (genPaddingChk && genPaddingChk.checked) {
+            var SUNO_PROMPT_MAX = 4999;
+            var sep = '\n';
+            var padRoom = SUNO_PROMPT_MAX - lyrics.length - sep.length;
+            if (padRoom > 0) {
+              var pad = 'wv'.repeat(Math.ceil(padRoom / 2)).slice(0, padRoom);
+              promptForSuno = lyrics + sep + pad;
+            }
+          }
           var payload = {
             session: session,
             title: genTitleInput.value.trim(),
-            prompt: lyrics,
+            prompt: promptForSuno,
+            originalPrompt: lyrics,
             tags: style,
             mv: genModelSelect.value,
             makeInstrumental: instrumental,
@@ -2582,14 +2745,14 @@
       }
       function startProcessTimer() {
         processStartedAt = Date.now();
-        if (uploadConfirmTimer) {
-          uploadConfirmTimer.hidden = false;
-          uploadConfirmTimer.textContent = '⏱ 00:00';
+        if (uploadConfirmRunTimer) {
+          uploadConfirmRunTimer.hidden = false;
+          uploadConfirmRunTimer.textContent = '⏱ 00:00';
         }
         if (processTimerHandle) clearInterval(processTimerHandle);
         processTimerHandle = setInterval(function () {
-          if (!processStartedAt || !uploadConfirmTimer) return;
-          uploadConfirmTimer.textContent = '⏱ ' + formatElapsed(Date.now() - processStartedAt);
+          if (!processStartedAt || !uploadConfirmRunTimer) return;
+          uploadConfirmRunTimer.textContent = '⏱ ' + formatElapsed(Date.now() - processStartedAt);
         }, 1000);
       }
       function stopProcessTimer() {
@@ -2636,6 +2799,20 @@
         if (uploadConfirmForceAssembleBtn) uploadConfirmForceAssembleBtn.hidden = false;
         if (uploadConfirmNoBtn) uploadConfirmNoBtn.disabled = false;
         if (uploadConfirmMsg) { uploadConfirmMsg.textContent = withQueueLabel(text); uploadConfirmMsg.className = 'suno-status'; }
+        // Khung dưới đây (vốn chỉ hiện đồng hồ) giờ hiện TÊN BÀI đang upload
+        // (1 dòng, cắt bớt kèm "…" nếu dài — xem .suno-timer-songname trong
+        // custom-polish.css); đồng hồ thật nằm riêng ở #uploadConfirmRunTimer
+        // ngay dưới dòng trạng thái, căn giữa (xem startProcessTimer).
+        if (uploadConfirmTimer) {
+          var loadingFileName = window.sunoCurrentSongTitle || '';
+          if (loadingFileName) {
+            uploadConfirmTimer.hidden = false;
+            uploadConfirmTimer.classList.add('suno-timer-songname');
+            uploadConfirmTimer.textContent = '🎵 ' + loadingFileName;
+          } else {
+            uploadConfirmTimer.hidden = true;
+          }
+        }
         showProcessPopup();
       }
       // (Nút "Upload" chờ bấm tay đã bỏ — xem startAutoUpload bên dưới,
@@ -2668,9 +2845,11 @@
           }
         }
         stopProcessTimer();
+        if (uploadConfirmRunTimer) uploadConfirmRunTimer.hidden = true;
         if (uploadConfirmTimer) {
           var elapsedText = processStartedAt ? formatElapsed(Date.now() - processStartedAt) : '--:--';
           var fileName = window.sunoCurrentSongTitle || '';
+          uploadConfirmTimer.classList.remove('suno-timer-songname');
           uploadConfirmTimer.hidden = false;
           uploadConfirmTimer.innerHTML = '';
           if (fileName) {
@@ -2708,7 +2887,8 @@
         if (uploadConfirmDoneActions) uploadConfirmDoneActions.hidden = true;
         if (uploadConfirmMsg) { uploadConfirmMsg.textContent = withQueueLabel(text); uploadConfirmMsg.className = 'suno-status err'; }
         stopProcessTimer();
-        if (uploadConfirmTimer) uploadConfirmTimer.hidden = true;
+        if (uploadConfirmRunTimer) uploadConfirmRunTimer.hidden = true;
+        if (uploadConfirmTimer) { uploadConfirmTimer.hidden = true; uploadConfirmTimer.classList.remove('suno-timer-songname'); }
         if (pipelineDoneCallback) {
           var errCb = pipelineDoneCallback;
           pipelineDoneCallback = null;
@@ -3072,6 +3252,7 @@
           var originalBaseName = queueBaseName(filePath.split(/[\\/]/).pop());
           var desiredBaseName = album.name + ' - ' + originalBaseName;
           window.sunoCurrentSongTitle = desiredBaseName; // tên SẠCH — dùng cho songsAdd/hiển thị, không dính tiền tố
+          window.__sunoLogNeedsClear = true; // bài mới bắt đầu — xem icon 🪵/☰ bên dưới, log cũ sẽ bị xoá ở lần mở tiếp theo
           if (typeof window.electronAPI.prepareImportTitle !== 'function') {
             importFileAsIfPicked(filePath);
             return;
@@ -3219,6 +3400,7 @@
       var openYoutubeBtn = document.getElementById('openYoutubeBtn');
       var closeYoutubeModalBtn = document.getElementById('closeYoutubeModalBtn');
       var ytLinkInput = document.getElementById('ytLinkInput');
+      var ytLinkPasteBtn = document.getElementById('ytLinkPasteBtn');
       var ytInfoBox = document.getElementById('ytInfoBox');
       var ytThumbPreview = document.getElementById('ytThumbPreview');
       var ytTitlePreview = document.getElementById('ytTitlePreview');
@@ -3250,6 +3432,7 @@
           youtubeModal.classList.remove('hidden');
         });
         if (closeYoutubeModalBtn) closeYoutubeModalBtn.addEventListener('click', function () { youtubeModal.classList.add('hidden'); });
+        if (ytLinkPasteBtn && ytLinkInput) ytLinkPasteBtn.addEventListener('click', function () { genPasteInto(ytLinkInput); });
         youtubeModal.addEventListener('mousedown', function (ev) {
           if (ev.target === youtubeModal) youtubeModal.classList.add('hidden');
         });
@@ -3296,6 +3479,7 @@
               var album = window.sunoCurrentAlbum;
               var desiredBaseName = album ? (album.name + ' - ' + ytCurrentInfo.title) : ytCurrentInfo.title;
               window.sunoCurrentSongTitle = desiredBaseName; // tên SẠCH — dùng cho songsAdd/hiển thị
+              window.__sunoLogNeedsClear = true; // bài mới bắt đầu — xem icon 🪵/☰ bên dưới, log cũ sẽ bị xoá ở lần mở tiếp theo
               if (window.electronAPI && typeof window.electronAPI.prepareImportTitle === 'function') {
                 // Tiền tố "_part " ở đầu — xem giải thích ở nhánh Import phía
                 // trên; gỡ lại trước khi đặt tên bài hoàn chỉnh lúc Xuất MP3.
@@ -3508,6 +3692,7 @@
             var album = window.sunoCurrentAlbum;
             var desiredBaseName = album ? (album.name + ' - ' + item.label) : item.label;
             window.sunoCurrentSongTitle = desiredBaseName; // tên SẠCH — dùng cho songsAdd/hiển thị
+            window.__sunoLogNeedsClear = true; // bài mới bắt đầu — xem icon 🪵/☰ bên dưới, log cũ sẽ bị xoá ở lần mở tiếp theo
             sunoQueueActiveItem = item;
             sunoQueuePositionLabel = '[' + (sunoQueue.indexOf(item) + 1) + '/' + sunoQueue.length + ']';
             pipelineDoneCallback = function (result) {
@@ -3635,7 +3820,16 @@
       var keyInput = document.getElementById('sunoProLicenseKeyInput'); // hidden — luôn giữ giá trị ghép từ các ô vuông
       var errorEl = document.getElementById('sunoProLicenseError');
       var submitBtn = document.getElementById('sunoProLicenseSubmit');
+      var buyKeyBtn = document.getElementById('sunoProBuyKeyBtn');
       var api = window.electronAPI;
+
+      if (buyKeyBtn) {
+        buyKeyBtn.addEventListener('click', function () {
+          if (api && typeof api.openExternal === 'function') {
+            api.openExternal('https://suno-pro-worker.vudungit92.workers.dev/mua-key');
+          }
+        });
+      }
 
       if (!gate || !api || typeof api.sunoProLicenseStatus !== 'function') {
         // Môi trường không hỗ trợ (vd. chạy trong trình duyệt dev) — không
@@ -3798,6 +3992,120 @@
       submitBtn.addEventListener('click', submit);
 
       refreshStatus();
+    });
+  </script>
+
+  <!-- ── Suno login gate: hiện SAU khi màn Key (phía trên) gỡ khoá
+       "sunopro-locked" khỏi <body> — tức là Key đã đúng. Trước khi cho vào
+       màn Album (phía dưới), script này bắt kiểm tra/đăng nhập Suno:
+         • Nếu máy đã có session đã lưu (suno-session.json) và sunoVerify
+           xác nhận còn dùng được → gỡ khoá luôn, không hỏi lại gì cả.
+         • Nếu chưa có / đã hết hạn → hiện #sunoLoginGate, bắt bấm "Đăng
+           nhập Suno" (gọi lại ĐÚNG api.sunoConnect() mà nút "Đăng nhập
+           trong app" trong popup Cấu hình (#sunoSettingsModal) đang dùng —
+           popup đó giữ nguyên, không sửa gì). Đăng nhập xong, main.js tự
+           lưu session + báo qua sự kiện "suno-connect-result" có sẵn.
+       Hoàn toàn cộng thêm (additive): không sửa/đụng vào 2 script gate còn
+       lại (Key ở trên, Album ở dưới), chỉ thêm/gỡ 2 class trên <body>
+       ("sunopro-locked" đọc, không đổi; "suno-login-locked" của riêng màn
+       này) bằng MutationObserver — không có cách nào khác để biết "màn Key
+       vừa unlock() xong" vì hàm đó nằm trong closure riêng của script kia. -->
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      var api = window.electronAPI;
+      var gate = document.getElementById('sunoLoginGate');
+      var introEl = document.getElementById('sunoLoginGateIntro');
+      var errorEl = document.getElementById('sunoLoginGateError');
+      var btn = document.getElementById('sunoLoginGateBtn');
+      var hintEl = document.getElementById('sunoLoginGateHint');
+
+      function unlockLogin() {
+        document.body.classList.remove('suno-login-locked');
+      }
+
+      if (!gate || !api || typeof api.sunoConnect !== 'function' || typeof api.sunoSessionLoad !== 'function' || typeof api.sunoVerify !== 'function') {
+        // Môi trường không hỗ trợ (vd. chạy trong trình duyệt dev) — không
+        // chặn, giống cách màn Key tự bỏ khoá khi thiếu electronAPI.
+        unlockLogin();
+        return;
+      }
+
+      var resolved = false; // đã xong việc của màn này trong phiên chạy app hiện tại
+      var connecting = false;
+
+      function setError(message) {
+        if (!message) { errorEl.hidden = true; errorEl.textContent = ''; return; }
+        errorEl.hidden = false;
+        errorEl.textContent = message;
+      }
+
+      function finish() {
+        if (resolved) return;
+        resolved = true;
+        gate.hidden = true;
+        unlockLogin();
+      }
+
+      function showGate(message) {
+        if (message) introEl.textContent = message;
+        gate.hidden = false;
+      }
+
+      function startLogin() {
+        if (connecting) return;
+        connecting = true;
+        setError('');
+        hintEl.hidden = false;
+        btn.disabled = true;
+        btn.textContent = 'Đang mở cửa sổ đăng nhập…';
+        api.sunoConnect().catch(function (e) {
+          connecting = false;
+          hintEl.hidden = true;
+          btn.disabled = false;
+          btn.textContent = 'Đăng nhập Suno';
+          setError((e && e.message) || 'Không mở được cửa sổ đăng nhập. Thử lại.');
+        });
+      }
+      btn.addEventListener('click', startLogin);
+
+      if (typeof api.onSunoConnectResult === 'function') {
+        api.onSunoConnectResult(function (res) {
+          // "suno-connect-result" cũng được bắn khi người dùng dùng nút
+          // "Đăng nhập trong app" ở popup Cấu hình (không liên quan màn
+          // này) — chỉ xử lý khi chính màn này vừa gọi sunoConnect().
+          if (!connecting) return;
+          connecting = false;
+          btn.disabled = false;
+          btn.textContent = 'Đăng nhập Suno';
+          hintEl.hidden = true;
+          if (res && res.ok) { finish(); return; }
+          if (res && res.cancelled) { setError('Bạn đã đóng cửa sổ đăng nhập. Bấm lại để thử tiếp.'); return; }
+          setError((res && res.error) || 'Đăng nhập chưa thành công. Vui lòng thử lại.');
+        });
+      }
+
+      function checkExistingSession() {
+        api.sunoSessionLoad().then(function (res) {
+          var saved = res && res.session;
+          if (!saved) return Promise.reject(new Error('no-session'));
+          return api.sunoVerify(saved);
+        }).then(function () {
+          finish();
+        }).catch(function () {
+          showGate('Đăng nhập tài khoản Suno để tiếp tục — session sẽ được lưu lại, lần sau không cần đăng nhập lại trừ khi hết hạn.');
+        });
+      }
+
+      // Chỉ bắt đầu kiểm tra SAU KHI màn Key đã gỡ "sunopro-locked" — tránh
+      // gọi sunoVerify (ra ngoài mạng) khi còn chưa chắc Key hợp lệ.
+      function waitForLicenseUnlock() {
+        if (!document.body.classList.contains('sunopro-locked')) { checkExistingSession(); return; }
+        var mo = new MutationObserver(function () {
+          if (!document.body.classList.contains('sunopro-locked')) { mo.disconnect(); checkExistingSession(); }
+        });
+        mo.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      }
+      waitForLicenseUnlock();
     });
   </script>
 

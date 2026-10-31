@@ -477,16 +477,27 @@ export async function studioAssemble(request: Request, _env: Env): Promise<Respo
   const saveProject = () => sunoStudioFetch("/api/studio/save-project", session, "POST", { project_id: projectId, state, title: baseTitle });
   await saveProject();
 
-  // ─── Xác minh sau khi lưu — port đúng cơ chế `dp()` của extension "Suno Toolkit" chính thức
-  // (sidepanel.js). Lý do cần đọc lại NHIỀU LẦN có độ trễ (không phải 1 lần ngay lập tức): Suno
-  // Studio có autosave phía trình duyệt — nếu người dùng từng mở sẵn 1 tab Studio của project
-  // này, tab đó giữ 1 bản state cũ và có thể tự autosave ĐÈ LÊN đúng lúc vừa save-project xong,
-  // xoá mất các part vừa thêm vài giây sau — kiểm tra ngay lập tức dễ "may mắn" đọc trúng lúc
-  // còn đúng rồi báo sai là thành công. Phát hiện thiếu part ở bất kỳ lần đọc nào → gửi lại
-  // NGUYÊN state đầy đủ (save-project không có kiểu "patch thêm 1 clip", luôn ghi đè toàn bộ)
-  // đúng 1 lần để "thắng" lượt autosave đè đó, rồi tiếp tục các lần đọc còn lại để xác nhận. ─────
+  // ─── Xác minh sau khi lưu — port đúng cơ chế verify của extension "Suno Toolkit" chính thức
+  // (ad()/f() trong cvt3.js), SỬA LẠI so với bản port trước: bản cũ gộp "ours" theo `number` (thứ
+  // tự client tự gán) rồi mới kiểm tra khoảng cách beat giữa các phần tử liền kề theo thứ tự ĐÓ —
+  // nên nếu Suno lưu lệch thứ tự thật trên timeline (2 part bị tráo vị trí vật lý, vẫn liền sát
+  // nhau về beat) thì vẫn báo "gapless: true", bỏ sót đúng kiểu lỗi khiến bài hoàn chỉnh bị đứt
+  // đoạn. Cách đúng: sort theo `startBeats` THỰC TẾ trên timeline rồi so khớp từng vị trí với dãy
+  // clipId mong đợi (seed trước, parts theo đúng số thứ tự) — thiếu 1 clip HOẶC đúng đủ clip nhưng
+  // sai thứ tự đều phải coi là THẤT BẠI, không phải cảnh báo mềm.
+  //
+  // Lý do cần đọc lại NHIỀU LẦN có độ trễ (không phải 1 lần ngay lập tức): Suno Studio có autosave
+  // phía trình duyệt — nếu người dùng từng mở sẵn 1 tab Studio của project này, tab đó giữ 1 bản
+  // state cũ và có thể tự autosave ĐÈ LÊN đúng lúc vừa save-project xong, xoá mất các part vừa
+  // thêm vài giây sau — kiểm tra ngay lập tức dễ "may mắn" đọc trúng lúc còn đúng rồi báo sai là
+  // thành công. Sau khi lần đọc đầu tiên đã sạch, vẫn đọc thêm vài lần nữa (STUDIO_VERIFY_EXTRA_READS)
+  // để bắt đúng kiểu autosave trễ này; hễ bất kỳ lần đọc nào (kể cả sau khi đã "qua") phát hiện sai
+  // thì toàn bộ request thất bại — không trả JSON "thành công kèm cảnh báo" nữa.
   const STUDIO_VERIFY_ATTEMPTS = 15;
   const STUDIO_VERIFY_DELAY_MS = 1500;
+  const STUDIO_VERIFY_EXTRA_READS = 2;
+
+  const expectedOrder = ordered.map((o) => o.clipId);
 
   const verifyPlacement = async () => {
     const check = await sunoStudioFetch("/api/studio/project/" + encodeURIComponent(projectId), session);
@@ -494,31 +505,28 @@ export async function studioAssemble(request: Request, _env: Env): Promise<Respo
     let checkBps = checkState?.timing?.bps;
     if (!(Number.isFinite(checkBps) && checkBps >= 0.3 && checkBps <= 5)) checkBps = bps;
     const audioTracks = (Array.isArray(checkState.tracks) ? checkState.tracks : []).filter((t: any) => t?.type === "audio" && Array.isArray(t.clips));
-    const ours: Array<{ number: number; startBeats: number; endBeats: number }> = [];
-    for (const t of audioTracks) {
-      for (const c of t.clips) {
-        const hit = ordered.find((o) => o.clipId === c?.asset?.id);
-        if (hit) ours.push({ number: hit.number, startBeats: c.startBeats, endBeats: c.endBeats });
-      }
-    }
-    ours.sort((a, b) => a.number - b.number);
-    const placedNumbers = ours.map((o) => o.number);
-    const expectedNumbers = ordered.map((o) => o.number);
-    const missing = expectedNumbers.filter((n) => !placedNumbers.includes(n));
+    const expectedSet = new Set(expectedOrder);
+    const placedClips = audioTracks
+      .flatMap((t: any) => (Array.isArray(t.clips) ? t.clips : []))
+      .filter((c: any) => c?.asset?.id && expectedSet.has(c.asset.id))
+      .sort((a: any, b: any) => (Number.isFinite(a.startBeats) ? a.startBeats : 0) - (Number.isFinite(b.startBeats) ? b.startBeats : 0));
+    const actualOrder: string[] = placedClips.map((c: any) => String(c.asset.id));
+    const missing = expectedOrder.filter((id) => !actualOrder.includes(id));
+    const misordered = missing.length === 0 && actualOrder.some((id: string, i: number) => id !== expectedOrder[i]);
     let gapless = true;
-    for (let i = 1; i < ours.length; i++) {
-      if (Math.abs(ours[i].startBeats - ours[i - 1].endBeats) > 0.001) {
+    for (let i = 1; i < placedClips.length; i++) {
+      if (Math.abs(placedClips[i].startBeats - placedClips[i - 1].endBeats) > 0.001) {
         gapless = false;
         break;
       }
     }
-    const totalBeats = ours.length ? ours[ours.length - 1].endBeats : 0;
-    return { checkBps, ours, missing, gapless, totalBeats };
+    const totalBeats = placedClips.length ? placedClips[placedClips.length - 1].endBeats : 0;
+    return { checkBps, missing, misordered, gapless, totalBeats, ok: missing.length === 0 && !misordered };
   };
 
   let result = await verifyPlacement();
   let resaved = false;
-  for (let attempt = 1; attempt < STUDIO_VERIFY_ATTEMPTS && result.missing.length > 0; attempt++) {
+  for (let attempt = 1; attempt < STUDIO_VERIFY_ATTEMPTS && !result.ok; attempt++) {
     await sleep(STUDIO_VERIFY_DELAY_MS);
     if (!resaved) {
       await saveProject();
@@ -526,17 +534,29 @@ export async function studioAssemble(request: Request, _env: Env): Promise<Respo
     }
     result = await verifyPlacement();
   }
+  if (result.ok) {
+    for (let i = 0; i < STUDIO_VERIFY_EXTRA_READS && result.ok; i++) {
+      await sleep(STUDIO_VERIFY_DELAY_MS);
+      result = await verifyPlacement();
+    }
+  }
+  if (!result.ok) {
+    const msg = !result.misordered
+      ? `Suno chỉ giữ ${expectedOrder.length - result.missing.length} trên ${expectedOrder.length} đoạn. Hãy đóng mọi tab Suno Studio đang mở rồi thử lại.`
+      : "Suno lưu các đoạn sai thứ tự. Hãy đóng mọi tab Suno Studio đang mở rồi thử lại.";
+    throw new HttpError(409, "arrangement_not_saved", msg);
+  }
 
   const studioUrl = "https://suno.com/studio?for_clip_id=" + encodeURIComponent(seedClipId) + "&st_project=" + encodeURIComponent(projectId);
   return json({
     projectId,
     studioUrl,
-    partsPlaced: ordered.length,
+    partsPlaced: expectedOrder.length,
     title: baseTitle,
-    verified: result.ours.length,
+    verified: expectedOrder.length,
     totalSec: result.totalBeats > 0 ? result.totalBeats / result.checkBps : 0,
-    gapless: result.gapless,
-    missing: result.missing,
+    gapless: true,
+    missing: [],
   });
 }
 
@@ -760,6 +780,23 @@ export async function generateStatus(request: Request, _env: Env): Promise<Respo
     };
   });
   return json({ clips });
+}
+
+/** `POST /suno/set-clip-prompt { token, cookieHeader, clipId, prompt, modelName }` — ghi đè lại
+ * lyrics hiển thị của 1 clip ĐÃ TẠO XONG trên chính Suno (endpoint dò được từ DevTools khi sửa
+ * lyrics thủ công trên suno.com: `/api/gen/:clipId/set_clip_prompt/`). Dùng để dọn lại lyrics
+ * sạch (bỏ phần đệm "wvwv..." chỉ cần cho lúc generate) SAU KHI audio đã tạo xong — không ảnh
+ * hưởng gì tới audio đã render, chỉ đổi phần chữ hiển thị. Gọi best-effort từ main.js ngay sau
+ * khi clip chuyển "ready", lỗi ở đây không được làm hỏng luồng tạo nhạc chính. */
+export async function setClipPrompt(request: Request, _env: Env): Promise<Response> {
+  const body = await readJson<Record<string, unknown> & { clipId?: unknown; prompt?: unknown; modelName?: unknown }>(request);
+  const session = readSession(body);
+  const clipId = cleanText(body.clipId, 100);
+  if (!clipId) throw new HttpError(400, "missing_clip_id", "Thiếu clip ID.");
+  const prompt = cleanText(body.prompt, 6000) || "";
+  const modelName = cleanText(body.modelName, 60) || "";
+  await sunoStudioFetch(`/api/gen/${encodeURIComponent(clipId)}/set_clip_prompt/`, session, "POST", { prompt, model_name: modelName }, 30000);
+  return json({ ok: true });
 }
 
 /** `POST /suno/my-songs { token, cookieHeader, cursor? }` — 1 trang bài hát

@@ -1356,6 +1356,27 @@ ipcMain.handle('suno-generate', async (event, payload) => {
   }
   const clips = clipIds.map((id) => doneClips.get(id) || { clipId: id, failed: true, status: 'timeout' });
   if (clips.every((c) => c.failed)) throw new Error('Suno tạo nhạc thất bại hoặc quá thời gian chờ (>10 phút).');
+
+  // "Xử lý Lyrics": payload.prompt (đã gửi lên Suno để tạo nhạc) có thể chứa thêm đoạn đệm
+  // "wvwv..." khác với payload.originalPrompt (lyrics thật, không đệm) — nếu 2 cái khác nhau
+  // nghĩa là đã bật tuỳ chọn này, nên sau khi audio tạo xong, tự gọi API set-clip-prompt để ghi
+  // đè lại lyrics hiển thị trên chính suno.com về đúng bản gốc, không còn thấy đoạn đệm nữa. Audio
+  // đã render xong không bị ảnh hưởng gì (chỉ đổi phần chữ hiển thị). Best-effort: lỗi ở bước này
+  // (vd. Suno đổi API) không được làm hỏng kết quả tạo nhạc chính, chỉ bỏ qua âm thầm.
+  if (typeof payload.originalPrompt === 'string' && payload.originalPrompt !== payload.prompt) {
+    for (const c of clips) {
+      if (c.failed) continue;
+      try {
+        await callSunoProWorker('/suno/set-clip-prompt', {
+          token, cookieHeader, deviceId,
+          clipId: c.clipId, prompt: payload.originalPrompt, modelName: payload.mv
+        });
+      } catch (e) {
+        // im lặng — dọn lyrics hiển thị trên Suno chỉ là phụ, không chặn kết quả chính.
+      }
+    }
+  }
+
   return { clips };
 });
 

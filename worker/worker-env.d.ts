@@ -17,4 +17,13 @@ interface Env {
   GMAIL_REFRESH_TOKEN?: string;
   // Địa chỉ Gmail dùng để gửi (phải trùng tài khoản đã cấp refresh token ở trên).
   GMAIL_SENDER?: string;
+  // Mua KEY bằng Stripe Checkout (xem src/stripe.ts) — Secret key gọi API Stripe + Signing secret
+  // của endpoint webhook (Dashboard Stripe → Developers → API keys / Webhooks).
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  // Price ID (price_...) của từng gói, tạo sẵn trên Stripe Dashboard → Product catalog.
+  STRIPE_PRICE_7D?: string;
+  STRIPE_PRICE_30D?: string;
+  STRIPE_PRICE_6M?: string;
+  STRIPE_PRICE_365D?: string;
 }

@@ -16,11 +16,13 @@ import {
   adminCreateBulk,
   adminDelete,
   adminDeleteExpiredTrials,
+  adminGetDownloadUrl,
   adminGetTrialCode,
   adminList,
   adminListTrialLeads,
   adminResetDevice,
   adminRotateKey,
+  adminSetDownloadUrl,
   adminSetTrialCode,
   adminUpdate,
   authorize,
@@ -31,7 +33,10 @@ import {
 } from "./auth";
 import { adminPageHtml } from "./admin-page";
 import { requestOtp, trialPageHtml, verifyOtp } from "./trial";
+import { guideOgImage, guidePageHtml } from "./guide";
 import { broadcastPreview, broadcastStart, broadcastStatus } from "./broadcast";
+import { muaKeyPageHtml, muaKeySuccessPageHtml } from "./mua-key";
+import { adminListPayments, createCheckout, getOrderStatus, stripeWebhook } from "./stripe";
 import {
   cleanup,
   downloadPrepare,
@@ -40,6 +45,7 @@ import {
   mangoRights,
   mySongs,
   permanentDelete,
+  setClipPrompt,
   studioAssemble,
   studioExportStart,
   studioExportStatus,
@@ -107,6 +113,9 @@ export default {
         if (bm && method === "GET") return broadcastStatus(env, bm[1]);
         if (pathname === "/admin/trial-code" && method === "GET") return adminGetTrialCode(env);
         if (pathname === "/admin/trial-code" && method === "POST") return adminSetTrialCode(request, env);
+        if (pathname === "/admin/download-url" && method === "GET") return adminGetDownloadUrl(env);
+        if (pathname === "/admin/download-url" && method === "POST") return adminSetDownloadUrl(request, env);
+        if (pathname === "/admin/payments" && method === "GET") return adminListPayments(env);
         const m = pathname.match(/^\/admin\/licenses\/([0-9a-f-]{8,36})(\/reset-device|\/rotate-key)?$/);
         if (m && !m[2] && method === "PATCH") return adminUpdate(request, env, m[1]);
         if (m && !m[2] && method === "DELETE") return adminDelete(env, m[1]);
@@ -115,10 +124,22 @@ export default {
         throw new HttpError(404, "not_found", "Không có đường dẫn này.");
       }
 
+      // ---- Trang hướng dẫn công khai: tải app Desktop → nhóm Zalo → /trial ----
+      if (pathname === "/huong-dan" && method === "GET") return guidePageHtml(env);
+      if (pathname === "/huong-dan/og-image.png" && method === "GET") return guideOgImage();
+
       // ---- Trang tự phục vụ: nhận key dùng thử (chưa cần đăng nhập) ----
       if (pathname === "/trial" && method === "GET") return trialPageHtml();
       if (pathname === "/trial/request-otp" && method === "POST") return requestOtp(request, env);
       if (pathname === "/trial/verify-otp" && method === "POST") return verifyOtp(request, env);
+
+      // ---- Mua KEY bằng Stripe Checkout (chưa cần đăng nhập) — xem src/stripe.ts ----
+      if (pathname === "/mua-key" && method === "GET") return muaKeyPageHtml();
+      if (pathname === "/mua-key/thanh-cong" && method === "GET") return muaKeySuccessPageHtml();
+      if (pathname === "/stripe/checkout" && method === "POST") return createCheckout(request, env);
+      if (pathname === "/stripe/webhook" && method === "POST") return stripeWebhook(request, env);
+      const stripeOrderMatch = pathname.match(/^\/stripe\/orders\/([A-Za-z0-9_]{10,80})$/);
+      if (stripeOrderMatch && method === "GET") return getOrderStatus(env, stripeOrderMatch[1]);
 
       // ---- Kích hoạt KEY (chưa cần đăng nhập) ----
       if (pathname === "/auth/activate" && method === "POST") return activate(request, env);
@@ -186,6 +207,10 @@ export default {
       if (pathname === "/suno/generate-status" && method === "POST") {
         requireApp(ctx);
         return generateStatus(request, env);
+      }
+      if (pathname === "/suno/set-clip-prompt" && method === "POST") {
+        requireApp(ctx);
+        return setClipPrompt(request, env);
       }
       if (pathname === "/suno/my-songs" && method === "POST") {
         requireApp(ctx);

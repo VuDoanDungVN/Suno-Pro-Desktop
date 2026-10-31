@@ -233,6 +233,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
       <div><h1>Khách hàng & key</h1><p>Tạo key, gia hạn, thu hồi và theo dõi thiết bị của từng khách.</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost" id="view-leads" type="button"></button>
+        <button class="btn ghost" id="view-payments" type="button"></button>
         <button class="btn ghost" id="broadcast-key" type="button"></button>
         <button class="btn ghost" id="cleanup-trial" type="button"></button>
         <button class="btn" id="bulk-key" type="button"></button>
@@ -247,6 +248,20 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
       <input class="input" id="trial-code-input" style="max-width:200px" maxlength="40" placeholder="Chưa đặt mã">
       <button class="btn sm" id="trial-code-save" type="button"></button>
       <span class="sub" style="flex:1 1 220px">Ghim mã này trong nhóm Zalo — người dùng cần nhập đúng mã mới nhận được key dùng thử tại trang <code>/trial</code>.</span>
+    </section>
+
+    <section class="panel" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <strong style="white-space:nowrap;min-width:150px">Link tải — Windows</strong>
+        <input class="input" id="download-url-win-input" style="max-width:420px;flex:1 1 320px" maxlength="500" placeholder="https://drive.google.com/...">
+        <button class="btn sm" id="download-url-win-save" type="button"></button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <strong style="white-space:nowrap;min-width:150px">Link tải — macOS</strong>
+        <input class="input" id="download-url-mac-input" style="max-width:420px;flex:1 1 320px" maxlength="500" placeholder="https://drive.google.com/...">
+        <button class="btn sm" id="download-url-mac-save" type="button"></button>
+      </div>
+      <span class="sub">2 nút "Tải cho Windows"/"Tải cho macOS" ở trang <code>/huong-dan</code> dùng các link này — đổi ở đây có hiệu lực ngay, không cần deploy lại.</span>
     </section>
 
     <div class="toolbar">
@@ -330,6 +345,20 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     </div>
     <p class="sub" id="leads-empty" hidden style="padding:16px 0 0;text-align:center">Chưa có ai đăng ký.</p>
     <div class="d-actions"><button class="btn" id="leads-download" type="button"></button><button class="btn primary" id="leads-done" type="button">Đóng</button></div>
+  </div>
+</dialog>
+
+<dialog id="payments" style="width:min(720px, calc(100vw - 32px))">
+  <div class="d-head"><h2>Dòng tiền — đơn mua KEY qua Stripe</h2><p id="payments-summary">—</p></div>
+  <div class="d-body">
+    <div style="max-height:400px;overflow:auto;border:1px solid var(--line);border-radius:10px">
+      <table>
+        <thead><tr><th>Lúc</th><th>Email</th><th>Gói</th><th>Số tiền</th><th>Trạng thái</th><th>Email key</th></tr></thead>
+        <tbody id="payments-rows"></tbody>
+      </table>
+    </div>
+    <p class="sub" id="payments-empty" hidden style="padding:16px 0 0;text-align:center">Chưa có đơn nào.</p>
+    <div class="d-actions"><button class="btn primary" id="payments-done" type="button">Đóng</button></div>
   </div>
 </dialog>
 
@@ -483,6 +512,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
       appView.hidden = false;
       load();
       loadTrialCode();
+      loadDownloadUrl();
     } else {
       loginView.hidden = false;
       appView.hidden = true;
@@ -684,8 +714,11 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   $("#bulk-key").innerHTML = icon("plus") + "Tạo hàng loạt";
   $("#cleanup-trial").innerHTML = icon("trash") + "Xoá trial hết hạn";
   $("#view-leads").innerHTML = icon("users") + "Email đăng ký";
+  $("#view-payments").innerHTML = icon("refresh") + "Dòng tiền";
   $("#broadcast-key").innerHTML = icon("refresh") + "Gửi mail hàng loạt";
   $("#trial-code-save").innerHTML = icon("check") + "Lưu mã";
+  $("#download-url-win-save").innerHTML = icon("check") + "Lưu link";
+  $("#download-url-mac-save").innerHTML = icon("check") + "Lưu link";
   $("#copy").innerHTML = icon("copy") + "Sao chép key";
 
   async function loadTrialCode() {
@@ -697,6 +730,24 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     try { await apiFetch("/admin/trial-code", { method: "POST", body: JSON.stringify({ code }) }); toast("Đã lưu mã xác nhận Zalo"); }
     catch (error) { toast(error.message, "bad"); }
   });
+
+  async function loadDownloadUrl() {
+    try {
+      const res = await apiFetch("/admin/download-url");
+      $("#download-url-win-input").value = res.win || "";
+      $("#download-url-mac-input").value = res.mac || "";
+    } catch { /* im lặng — không chặn trang chính */ }
+  }
+  function wireDownloadUrlSave(platform, inputId, btnId) {
+    $(btnId).addEventListener("click", async () => {
+      const url = $(inputId).value.trim();
+      if (!url) return toast("Nhập link trước khi lưu.", "bad");
+      try { await apiFetch("/admin/download-url", { method: "POST", body: JSON.stringify({ platform, url }) }); toast("Đã lưu link tải app (" + platform + ")"); }
+      catch (error) { toast(error.message, "bad"); }
+    });
+  }
+  wireDownloadUrlSave("win", "#download-url-win-input", "#download-url-win-save");
+  wireDownloadUrlSave("mac", "#download-url-mac-input", "#download-url-mac-save");
 
   $("#tabs").addEventListener("click", (e) => { const tab = e.target.closest("[data-tab]"); if (!tab) return; filter = tab.dataset.tab; currentPage = 1; render(); });
   $("#trial-only").addEventListener("change", () => { currentPage = 1; render(); });
@@ -851,6 +902,40 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     URL.revokeObjectURL(url);
   });
   $("#leads-done").addEventListener("click", () => $("#leads").close());
+
+  const PAYMENT_PLAN_LABELS = { "7d": "7 ngày", "30d": "30 ngày", "6m": "6 tháng", "365d": "1 năm" };
+  const PAYMENT_STATUS_PILLS = {
+    paid: '<span class="pill ok">Đã thanh toán</span>',
+    pending: '<span class="pill muted">Chờ thanh toán</span>',
+    processing: '<span class="pill muted">Đang xử lý</span>',
+    failed: '<span class="pill bad">Thất bại</span>',
+    expired: '<span class="pill muted">Hết hạn</span>',
+  };
+  function formatMoney(cents, currency) {
+    if (cents === null || cents === undefined) return "—";
+    const amount = currency && currency.toLowerCase() === "vnd" ? cents : cents / 100;
+    return amount.toLocaleString("vi-VN") + " " + String(currency || "").toUpperCase();
+  }
+  function renderPayments(orders) {
+    $("#payments-rows").innerHTML = orders.map((o) =>
+      '<tr><td>' + dateTime(o.createdAt) + '</td><td class="mono" style="font-size:12.5px">' + esc(o.email) + '</td>' +
+      '<td>' + esc(PAYMENT_PLAN_LABELS[o.plan] || o.plan) + '</td><td>' + formatMoney(o.amountCents, o.currency) + '</td>' +
+      '<td>' + (PAYMENT_STATUS_PILLS[o.status] || esc(o.status)) + '</td>' +
+      '<td>' + (o.emailSent === null ? "—" : o.emailSent ? '<span class="pill ok">Đã gửi</span>' : '<span class="pill bad">Lỗi gửi</span>') + '</td></tr>',
+    ).join("");
+    $("#payments-empty").hidden = orders.length > 0;
+    const paid = orders.filter((o) => o.status === "paid");
+    const total = paid.reduce((sum, o) => sum + (o.amountCents || 0), 0);
+    $("#payments-summary").textContent = paid.length + " đơn đã thanh toán · tổng " + formatMoney(total, paid[0]?.currency || "vnd") + " (trong " + orders.length + " đơn tất cả trạng thái)";
+  }
+  $("#view-payments").addEventListener("click", async () => {
+    $("#payments").showModal();
+    try {
+      const orders = (await apiFetch("/admin/payments")).orders;
+      renderPayments(orders);
+    } catch (error) { toast(error.message, "bad"); }
+  });
+  $("#payments-done").addEventListener("click", () => $("#payments").close());
 
   $("#broadcast-key").addEventListener("click", async () => {
     $("#broadcast-form").reset();
