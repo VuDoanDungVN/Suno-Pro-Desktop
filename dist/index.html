@@ -1155,7 +1155,7 @@
               </label>
             </div>
             <label class="field-label-sm" for="sunoSplitSecs">Số giây mỗi đoạn</label>
-            <input type="text" id="sunoSplitSecs" class="suno-seconds-input suno-prep-secs-input" value="8-10 (ngẫu nhiên)" readonly aria-label="Số giây mỗi đoạn — ngẫu nhiên 8 đến 10 giây, không cố định" title="Mỗi đoạn được chọn ngẫu nhiên 8, 9 hoặc 10 giây — giảm số lượng đoạn so với 4s cố định trước đây, giúp giảm số lần chạm giới hạn tốc độ của Suno.">
+            <input type="text" id="sunoSplitSecs" class="suno-seconds-input suno-prep-secs-input" value="4" readonly aria-label="Số giây mỗi đoạn — cố định 4 giây" title="Mỗi đoạn cố định 4 giây — khớp với mức mặc định của extension Chrome chính chủ, giúp giảm tỷ lệ Suno từ chối nội dung (đoạn ngắn khó bị dò trùng bản quyền hơn).">
             <span class="step-tag step-tag-alt">Cách khác (thủ công)</span>
             <div class="suno-panel-row">
               <button id="sunoOpenLogin" class="suno-test-btn suno-btn-ghost" title="Mở trình duyệt đã chọn (đúng profile) lên trang Suno để bạn đăng nhập bằng tay, rồi bấm lại nút Tự lấy session">Mở trình duyệt login</button>
@@ -1830,7 +1830,6 @@
           // nội dung thật ghi trong debug.log. Khớp mẫu cụ thể trước, mẫu
           // nào không khớp thì chỉ đồng bộ "part N" → "Dữ liệu N" như cũ.
           var friendly = null;
-          var mCutDoneRandom = /^đã cắt xong,\s*số parts=(\d+)\s*giây mỗi part=8-10 ngẫu nhiên/i.exec(rest);
           var mCutDone = /^đã cắt xong,\s*số parts=(\d+)\s*giây mỗi part=([\d.]+)/i.exec(rest);
           var mPartStart = /^part\s+(\d+)\s*▶\s*bắt đầu xử lý\s*—\s*([\d.]+)s/i.exec(rest);
           var mDone = /✅\s*HOÀN TẤT\s*—\s*(\d+)\s*clip,\s*tổng\s*[\d.]+s(.*)$/i.exec(rest);
@@ -1843,9 +1842,7 @@
           var mRateRetry = /⏸\s*(?:\(chế độ cũ\)\s*)?bị Suno giới hạn tốc độ \(429\)\s*—\s*lần\s*(\d+),\s*(?:Suno yêu cầu chờ đúng|chờ)\s*([\d.]+)s/i.exec(rest);
           var mHttp429 = /✗\s*(?:\(chế độ cũ[^)]*\)\s*)?LỖI:.*\b429\b/i.test(rest);
           var mErr = /✗\s*LỖI:/i.test(rest) && /suno.{0,4}từ chối/i.test(rest);
-          if (mCutDoneRandom) {
-            friendly = 'Đã đo luồng xong, số luồng là : ' + mCutDoneRandom[1] + ' , mỗi luồng là : 8-10 (ngẫu nhiên)';
-          } else if (mCutDone) {
+          if (mCutDone) {
             friendly = 'Đã đo luồng xong, số luồng là : ' + mCutDone[1] + ' , mỗi luồng là : ' + mCutDone[2];
           } else if (mPartStart) {
             friendly = 'Luồng ' + mPartStart[1] + ' - Bắt đầu tiến trình xử lý - mỗi luồng là : ' + Number(mPartStart[2]);

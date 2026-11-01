@@ -884,10 +884,21 @@ function sunoNormalizeDeviceId(raw) {
   return raw.replace(/^["']|["']$/g, '').trim();
 }
 
+// Cache JWT vừa mint qua Clerk — tránh phải xin JWT mới (2 lượt gọi thẳng clerk.suno.com) cho
+// MỖI lần gọi sunoResolveToken(). Trước đây khi split-upload nhiều part liên tiếp (ví dụ 75 part
+// cho 1 bài), mỗi part đều mint lại từ đầu dù session chưa đổi — tốn thêm ~1-2s/part oan uổng.
+// JWT Clerk mặc định sống 60s, cache 45s để có đệm an toàn trước khi hết hạn.
+const SUNO_TOKEN_CACHE_MS = 45000;
+let sunoTokenCache = null; // { rawSession, token, cookieHeader, deviceId, mintedAt }
+
 async function sunoResolveToken(session) {
   const raw = sunoExtractSession(session);
   if (!raw) throw new Error('Chưa có session Suno. Dán session tài khoản Suno vào trước.');
   if (sunoLooksLikeJwt(raw)) return { token: raw, cookieHeader: null, deviceId: null };
+
+  if (sunoTokenCache && sunoTokenCache.rawSession === raw && (Date.now() - sunoTokenCache.mintedAt) < SUNO_TOKEN_CACHE_MS) {
+    return { token: sunoTokenCache.token, cookieHeader: sunoTokenCache.cookieHeader, deviceId: sunoTokenCache.deviceId };
+  }
 
   const cookies = sunoParseCookies(raw);
   const clientVal = cookies.__client;
@@ -922,6 +933,7 @@ async function sunoResolveToken(session) {
           }
         });
         if (tokenRes.json && tokenRes.json.jwt) {
+          sunoTokenCache = { rawSession: raw, token: tokenRes.json.jwt, cookieHeader, deviceId, mintedAt: Date.now() };
           return { token: tokenRes.json.jwt, cookieHeader, deviceId };
         }
       }
@@ -1018,6 +1030,7 @@ ipcMain.handle('suno-session-save', (event, session) => {
 });
 
 ipcMain.handle('suno-session-clear', async () => {
+  sunoTokenCache = null;
   try {
     const file = sunoSessionFile();
     if (fs.existsSync(file)) fs.unlinkSync(file);
