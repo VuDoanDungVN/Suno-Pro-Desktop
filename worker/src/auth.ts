@@ -201,6 +201,14 @@ export async function activate(request: Request, env: Env): Promise<Response> {
   const key = normalize(body.key);
   const deviceId = cleanText(body.deviceId, 100);
   if (key.length < 10 || !deviceId) throw new HttpError(400, "bad_key", "Key không hợp lệ.");
+  // KEY hệ thống (owner) — gõ y hệt 1 KEY thường vào đúng màn "Kích hoạt" (16 ô), nhưng so khớp
+  // trực tiếp với secret API_TOKEN thay vì tra bảng licenses: không có hàng license nào cho nó cả,
+  // không ràng buộc thiết bị, không tạo session trong D1 (xem authorize() — Bearer token khớp y hệt
+  // giá trị API_TOKEN thì luôn được coi là role "owner", bất kể từ máy nào/app nào gửi lên).
+  if (env.API_TOKEN && sameText(key, normalize(env.API_TOKEN))) {
+    await clearRateLimit(env, rateKey);
+    return json({ token: env.API_TOKEN, license: null });
+  }
   const row = await env.DB.prepare("SELECT * FROM licenses WHERE key_hash = ?").bind(await sha256Hex(key)).first<LicenseRow>();
   if (!row) {
     await recordRateLimitFail(env, rateKey, ACTIVATE_LOCK_MS);
@@ -478,6 +486,31 @@ export async function adminDeleteExpiredTrials(env: Env): Promise<Response> {
   return json({ ok: true, deleted: ids.length });
 }
 
+/** `POST /admin/licenses/trial/renew-expired` — gia hạn hàng loạt KEY DÙNG THỬ (`is_trial = 1`)
+ * đã hết hạn, mỗi key cộng thêm đúng 1 ngày tính từ bây giờ. CHỈ áp dụng cho key dùng thử còn
+ * đang "active" (không đụng tới key đã bị thu hồi) và đã hết hạn — không ảnh hưởng key dùng thử
+ * còn hiệu lực hay key khách hàng trả phí. */
+export async function adminRenewExpiredTrials(env: Env): Promise<Response> {
+  const t = now();
+  const newExpiresAt = t + DAY_MS;
+  const { results } = await env.DB.prepare(
+    "SELECT id FROM licenses WHERE is_trial = 1 AND status = 'active' AND expires_at IS NOT NULL AND expires_at <= ?",
+  )
+    .bind(t)
+    .all<{ id: string }>();
+  const ids = results.map((r) => r.id);
+  const CHUNK = 50;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    await env.DB.batch(
+      chunk.map((id) =>
+        env.DB.prepare("UPDATE licenses SET expires_at = ?, updated_at = ? WHERE id = ?").bind(newExpiresAt, t, id),
+      ),
+    );
+  }
+  return json({ ok: true, renewed: ids.length, expiresAt: newExpiresAt });
+}
+
 /** Dùng bởi luồng tự phục vụ `/trial/*` — tạo đúng 1 key trial gắn với email đã xác minh OTP. */
 export async function createTrialLicense(env: Env, name: string, email: string, days: number) {
   const durationMs = days * DAY_MS;
@@ -584,6 +617,36 @@ export async function adminSetDownloadUrl(request: Request, env: Env): Promise<R
   if (!url || !/^https?:\/\//i.test(url)) throw new HttpError(400, "bad_url", "Link không hợp lệ (phải bắt đầu bằng http(s)://).");
   await metaSet(env, `app_download_url_${platform}`, url);
   return json({ ok: true, platform, url });
+}
+
+/** `GET /admin/app-version` — số phiên bản mới nhất hiện đang bắt khách phải khớp mới cho dùng
+ * (xem appVersionCheck() — app gọi lúc khởi động). */
+export async function adminGetAppVersion(env: Env): Promise<Response> {
+  const version = (await metaGet(env, "app_latest_version")) ?? "";
+  return json({ version });
+}
+
+/** `POST /admin/app-version { version }` — đổi số phiên bản mới nhất, có hiệu lực ngay cho mọi app
+ * đang mở (gọi lại appVersionCheck() mỗi lần khởi động) mà không cần deploy lại Worker. */
+export async function adminSetAppVersion(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<{ version?: unknown }>(request);
+  const version = cleanText(body.version, 40);
+  if (!version || !/^\d+(\.\d+){1,3}$/.test(version)) {
+    throw new HttpError(400, "bad_version", "Phiên bản phải dạng số, vd 2.5.0 (tối đa 4 phần, cách nhau bằng dấu chấm).");
+  }
+  await metaSet(env, "app_latest_version", version);
+  return json({ ok: true, version });
+}
+
+/** `GET /app/version-check` — bắt buộc Bearer token hợp lệ (qua authorize() ở index.ts, trước khi
+ * route tới đây) — cả role "owner" lẫn "desktop" đều gọi được, app tự quyết định hành vi theo role
+ * (owner: chỉ thông báo, không chặn — xem renderer). Trả phiên bản mới nhất admin đã đặt + 2 link
+ * tải sẵn có (tái dùng đúng key app_download_url_win/_mac của /admin/download-url). */
+export async function appVersionCheck(env: Env): Promise<Response> {
+  const latestVersion = (await metaGet(env, "app_latest_version")) ?? "";
+  const downloadUrlWin = (await metaGet(env, "app_download_url_win")) ?? (await metaGet(env, "app_download_url")) ?? "";
+  const downloadUrlMac = (await metaGet(env, "app_download_url_mac")) ?? "";
+  return json({ latestVersion, downloadUrlWin, downloadUrlMac });
 }
 
 /** `PATCH /admin/licenses/:id { name?, email?, note?, status?, expiresAt?, extendDays? }`

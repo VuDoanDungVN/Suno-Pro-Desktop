@@ -16,15 +16,19 @@ import {
   adminCreateBulk,
   adminDelete,
   adminDeleteExpiredTrials,
+  adminGetAppVersion,
   adminGetDownloadUrl,
   adminGetTrialCode,
   adminList,
   adminListTrialLeads,
+  adminRenewExpiredTrials,
   adminResetDevice,
   adminRotateKey,
+  adminSetAppVersion,
   adminSetDownloadUrl,
   adminSetTrialCode,
   adminUpdate,
+  appVersionCheck,
   authorize,
   logout,
   me,
@@ -58,28 +62,30 @@ import {
   verify,
 } from "./suno-proxy";
 
-// Ghi lại "token"/"cookieHeader" (chứa __client/__session của Suno) mà app gửi kèm mỗi request
-// /suno/* — chỉ để trang quản trị xem lại khách này đang dùng tài khoản Suno nào, không ảnh
-// hưởng tới xử lý request chính (lỗi đọc/ghi ở đây bị nuốt, không bao giờ làm hỏng request gốc).
-// Đọc body qua request.clone() vì handler phía sau còn cần đọc lại chính body đó.
-async function recordSunoSession(request: Request, env: Env, licenseId: string): Promise<void> {
-  if (licenseId === "owner") return;
-  try {
-    const body = await request.clone().json<Record<string, unknown>>();
-    const cookieHeader = typeof body.cookieHeader === "string" ? body.cookieHeader.slice(0, 4000) : null;
-    const token = typeof body.token === "string" ? body.token.slice(0, 4000) : null;
-    if (!cookieHeader && !token) return;
-    await env.DB.prepare("UPDATE licenses SET last_session_cookie = ?, last_session_token = ?, last_session_at = ? WHERE id = ?")
-      .bind(cookieHeader, token, Date.now(), licenseId)
-      .run();
-  } catch {
-    // best-effort
-  }
+// Log lỗi /suno/* theo từng KEY — thay thế hẳn cho cách cũ (ghi "last session cookie/token" vào
+// D1 trên mỗi request, đã bị xoá vì đây chính là nguồn ngốn quota D1 lớn nhất — xem lịch sử audit
+// trong README/trao đổi). Dùng console.error (Cloudflare Workers Logs — `observability.enabled`
+// đã bật sẵn trong wrangler.jsonc) thay vì D1: KHÔNG tính vào quota D1, xem được lịch sử gần đây
+// và tìm kiếm trực tiếp trong Cloudflare Dashboard → Workers & Pages → suno-pro-worker → Logs
+// (lọc theo chữ licenseId), hoặc xem trực tiếp (real-time) bằng `npx wrangler tail` khi đang hỗ
+// trợ khách ngay lúc đó. CHỈ log khi THỰC SỰ có lỗi (không log mọi request) — đúng mục đích "tìm
+// nguyên nhân khi khách gặp vấn đề lúc upload/tạo nhạc", không log tràn lan.
+function logSunoError(licenseId: string, pathname: string, err: unknown): void {
+  const message = err instanceof HttpError ? err.message : err instanceof Error ? err.message : String(err);
+  const code = err instanceof HttpError ? err.code : "unknown_error";
+  console.error(
+    JSON.stringify({ tag: "suno_error", licenseId, path: pathname, code, message, at: new Date().toISOString() }),
+  );
 }
 
 function withErrors(handler: () => Promise<Response>): Promise<Response> {
   return handler().catch((err) => {
-    if (err instanceof HttpError) return json({ error: err.code, message: err.message }, err.status);
+    if (err instanceof HttpError) {
+      return json(
+        { error: err.code, message: err.message, ...(err.retryAfterMs != null ? { retryAfterMs: err.retryAfterMs } : {}) },
+        err.status,
+      );
+    }
     console.error(err);
     return json({ error: "internal_error", message: "Lỗi máy chủ không xác định." }, 500);
   });
@@ -106,6 +112,7 @@ export default {
         if (pathname === "/admin/licenses" && method === "POST") return adminCreate(request, env);
         if (pathname === "/admin/licenses/bulk" && method === "POST") return adminCreateBulk(request, env);
         if (pathname === "/admin/licenses/trial/expired" && method === "DELETE") return adminDeleteExpiredTrials(env);
+        if (pathname === "/admin/licenses/trial/renew-expired" && method === "POST") return adminRenewExpiredTrials(env);
         if (pathname === "/admin/trial-leads" && method === "GET") return adminListTrialLeads(env);
         if (pathname === "/admin/trial-leads/broadcast/preview" && method === "POST") return broadcastPreview(request, env);
         if (pathname === "/admin/trial-leads/broadcast" && method === "POST") return broadcastStart(request, env);
@@ -115,6 +122,8 @@ export default {
         if (pathname === "/admin/trial-code" && method === "POST") return adminSetTrialCode(request, env);
         if (pathname === "/admin/download-url" && method === "GET") return adminGetDownloadUrl(env);
         if (pathname === "/admin/download-url" && method === "POST") return adminSetDownloadUrl(request, env);
+        if (pathname === "/admin/app-version" && method === "GET") return adminGetAppVersion(env);
+        if (pathname === "/admin/app-version" && method === "POST") return adminSetAppVersion(request, env);
         if (pathname === "/admin/payments" && method === "GET") return adminListPayments(env);
         const m = pathname.match(/^\/admin\/licenses\/([0-9a-f-]{8,36})(\/reset-device|\/rotate-key)?$/);
         if (m && !m[2] && method === "PATCH") return adminUpdate(request, env, m[1]);
@@ -149,83 +158,97 @@ export default {
 
       if (pathname === "/auth/me" && method === "GET") return me(env, ctx);
       if (pathname === "/auth/logout" && method === "POST") return logout(request, env);
+      if (pathname === "/app/version-check" && method === "GET") return appVersionCheck(env);
 
-      // ---- Proxy gọi Suno — xem src/suno-proxy.ts ----
-      if (pathname.startsWith("/suno/")) await recordSunoSession(request, env, ctx.licenseId);
-      if (pathname === "/suno/verify" && method === "POST") {
-        requireApp(ctx);
-        return verify(request, env);
-      }
-      if (pathname === "/suno/upload/init" && method === "POST") {
-        requireApp(ctx);
-        return uploadInit(request, env);
-      }
-      if (pathname === "/suno/upload/finish" && method === "POST") {
-        requireApp(ctx);
-        return uploadFinish(request, env);
-      }
-      if (pathname === "/suno/upload/status" && method === "POST") {
-        requireApp(ctx);
-        return uploadStatus(request, env);
-      }
-      if (pathname === "/suno/upload/initialize-clip" && method === "POST") {
-        requireApp(ctx);
-        return uploadInitializeClip(request, env);
-      }
-      if (pathname === "/suno/studio/assemble" && method === "POST") {
-        requireApp(ctx);
-        return studioAssemble(request, env);
-      }
-      if (pathname === "/suno/studio/inspect" && method === "POST") {
-        requireApp(ctx);
-        return studioInspect(request, env);
-      }
-      if (pathname === "/suno/studio/export/start" && method === "POST") {
-        requireApp(ctx);
-        return studioExportStart(request, env);
-      }
-      if (pathname === "/suno/studio/export/status" && method === "POST") {
-        requireApp(ctx);
-        return studioExportStatus(request, env);
-      }
-      if (pathname === "/suno/cleanup" && method === "POST") {
-        requireApp(ctx);
-        return cleanup(request, env);
-      }
-      if (pathname === "/suno/permanent-delete" && method === "POST") {
-        requireApp(ctx);
-        return permanentDelete(request, env);
-      }
-      if (pathname === "/suno/trash-clip" && method === "POST") {
-        requireApp(ctx);
-        return trashClip(request, env);
-      }
-      if (pathname === "/suno/generate" && method === "POST") {
-        requireApp(ctx);
-        return generate(request, env);
-      }
-      if (pathname === "/suno/generate-status" && method === "POST") {
-        requireApp(ctx);
-        return generateStatus(request, env);
-      }
-      if (pathname === "/suno/set-clip-prompt" && method === "POST") {
-        requireApp(ctx);
-        return setClipPrompt(request, env);
-      }
-      if (pathname === "/suno/my-songs" && method === "POST") {
-        requireApp(ctx);
-        return mySongs(request, env);
-      }
-      if (pathname === "/suno/download/prepare" && method === "POST") {
-        requireApp(ctx);
-        return downloadPrepare(request, env);
-      }
-      if (pathname === "/suno/mango-rights" && method === "POST") {
-        requireApp(ctx);
-        return mangoRights(request, env);
+      // ---- Proxy gọi Suno — xem src/suno-proxy.ts. Bọc try/catch riêng để log lỗi theo từng KEY
+      // (xem logSunoError ở trên) — không log khi thành công, chỉ khi có vấn đề thật. ----
+      if (pathname.startsWith("/suno/")) {
+        try {
+          const res = await routeSuno(pathname, method, request, env, ctx);
+          if (res) return res;
+        } catch (err) {
+          logSunoError(ctx.licenseId, pathname, err);
+          throw err;
+        }
       }
 
       throw new HttpError(404, "not_found", "Không có đường dẫn này.");
     });
   },
 };
+
+async function routeSuno(pathname: string, method: string, request: Request, env: Env, ctx: Ctx): Promise<Response | null> {
+  if (pathname === "/suno/verify" && method === "POST") {
+    requireApp(ctx);
+    return verify(request, env);
+  }
+  if (pathname === "/suno/upload/init" && method === "POST") {
+    requireApp(ctx);
+    return uploadInit(request, env);
+  }
+  if (pathname === "/suno/upload/finish" && method === "POST") {
+    requireApp(ctx);
+    return uploadFinish(request, env);
+  }
+  if (pathname === "/suno/upload/status" && method === "POST") {
+    requireApp(ctx);
+    return uploadStatus(request, env);
+  }
+  if (pathname === "/suno/upload/initialize-clip" && method === "POST") {
+    requireApp(ctx);
+    return uploadInitializeClip(request, env);
+  }
+  if (pathname === "/suno/studio/assemble" && method === "POST") {
+    requireApp(ctx);
+    return studioAssemble(request, env);
+  }
+  if (pathname === "/suno/studio/inspect" && method === "POST") {
+    requireApp(ctx);
+    return studioInspect(request, env);
+  }
+  if (pathname === "/suno/studio/export/start" && method === "POST") {
+    requireApp(ctx);
+    return studioExportStart(request, env);
+  }
+  if (pathname === "/suno/studio/export/status" && method === "POST") {
+    requireApp(ctx);
+    return studioExportStatus(request, env);
+  }
+  if (pathname === "/suno/cleanup" && method === "POST") {
+    requireApp(ctx);
+    return cleanup(request, env);
+  }
+  if (pathname === "/suno/permanent-delete" && method === "POST") {
+    requireApp(ctx);
+    return permanentDelete(request, env);
+  }
+  if (pathname === "/suno/trash-clip" && method === "POST") {
+    requireApp(ctx);
+    return trashClip(request, env);
+  }
+  if (pathname === "/suno/generate" && method === "POST") {
+    requireApp(ctx);
+    return generate(request, env);
+  }
+  if (pathname === "/suno/generate-status" && method === "POST") {
+    requireApp(ctx);
+    return generateStatus(request, env);
+  }
+  if (pathname === "/suno/set-clip-prompt" && method === "POST") {
+    requireApp(ctx);
+    return setClipPrompt(request, env);
+  }
+  if (pathname === "/suno/my-songs" && method === "POST") {
+    requireApp(ctx);
+    return mySongs(request, env);
+  }
+  if (pathname === "/suno/download/prepare" && method === "POST") {
+    requireApp(ctx);
+    return downloadPrepare(request, env);
+  }
+  if (pathname === "/suno/mango-rights" && method === "POST") {
+    requireApp(ctx);
+    return mangoRights(request, env);
+  }
+  return null;
+}

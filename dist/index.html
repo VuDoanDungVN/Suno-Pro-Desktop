@@ -38,7 +38,24 @@
           <div id="sunoProLicenseError" class="suno-status err" hidden></div>
           <button id="sunoProLicenseSubmit" class="suno-connect-btn suno-full-width-btn" type="button" style="margin-top:16px;">Kích hoạt</button>
           <button id="sunoProBuyKeyBtn" class="suno-test-btn suno-btn-ghost suno-full-width-btn" type="button" style="margin-top:8px;" title="Mở trang mua KEY trong trình duyệt">💳 Mua KEY</button>
+          <button id="sunoProTrialKeyBtn" class="suno-test-btn suno-btn-ghost suno-full-width-btn" type="button" style="margin-top:8px;" title="Mở trang nhận KEY dùng thử trong trình duyệt">🎁 Nhận KEY dùng thử tại đây</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Kiểm tra phiên bản app — chèn SAU màn xác minh Key. KEY khách hàng thường bị
+       CHẶN HẲN (không có nút bỏ qua) nếu phiên bản cũ hơn bản mới nhất admin đặt;
+       KEY hệ thống (owner) chỉ xem thông báo rồi bấm "Đồng ý" là qua luôn, không
+       bị tự chặn chính mình. Xem checkAppVersionGate() cuối file. -->
+  <div id="appVersionGate" class="albums-gate" hidden>
+    <div class="albums-gate-inner">
+      <div class="albums-firstrun">
+        <div class="albums-firstrun-icon" aria-hidden="true">⬆️</div>
+        <h2 id="appVersionGateTitle">Có bản cập nhật mới</h2>
+        <p id="appVersionGateMsg"></p>
+        <button id="appVersionDownloadBtn" class="suno-connect-btn suno-full-width-btn" type="button" style="margin-top:16px;">⬇ Download Update</button>
+        <button id="appVersionAgreeBtn" class="suno-test-btn suno-btn-ghost suno-full-width-btn" type="button" style="margin-top:8px;" hidden>Đồng ý</button>
       </div>
     </div>
   </div>
@@ -169,10 +186,11 @@
       <div id="sunoSettingsDropdown" class="suno-settings-dropdown" hidden role="menu">
         <button id="menuOpenDownloadBtn" class="suno-settings-dropdown-item" type="button" role="menuitem">⬇️ Download Suno</button>
         <button id="menuOpenLibraryBtn" class="suno-settings-dropdown-item" type="button" role="menuitem">📚 Thư viện Suno</button>
-        <button id="menuOpenSettingsBtn" class="suno-settings-dropdown-item" type="button" role="menuitem">⚙️ Cấu hình đăng nhập</button>
+        <button id="menuOpenSettingsBtn" class="suno-settings-dropdown-item" type="button" role="menuitem" hidden>⚙️ Cấu hình đăng nhập</button>
         <button id="menuOpenLicenseInfoBtn" class="suno-settings-dropdown-item" type="button" role="menuitem">⏳ Thời hạn của Key</button>
-        <button id="menuOpenLogViewerBtn" class="suno-settings-dropdown-item" type="button" role="menuitem">☰ Nhật ký tiến trình</button>
-        <button id="menuQuitAppBtn" class="suno-settings-dropdown-item suno-settings-dropdown-item-danger" type="button" role="menuitem">⏻ Thoát ứng dụng</button>
+        <button id="menuOpenLogViewerBtn" class="suno-settings-dropdown-item" type="button" role="menuitem" hidden>☰ Nhật ký tiến trình</button>
+        <button id="menuSunoLogoutBtn" class="suno-settings-dropdown-item" type="button" role="menuitem">⏻ Đăng xuất Suno</button>
+        <button id="menuQuitAppBtn" class="suno-settings-dropdown-item suno-settings-dropdown-item-danger" type="button" role="menuitem">⏻ Thoát App Suno Pro</button>
       </div>
     </div>
   </div>
@@ -472,6 +490,11 @@
         <button class="album-songs-tab" type="button" data-filter="failed">Lỗi</button>
       </div>
       <div id="albumSongsList" class="albums-list-items"></div>
+      <div id="albumSongsPagination" class="suno-upload-pagination" hidden>
+        <button id="albumSongsPrevBtn" class="suno-test-btn suno-btn-ghost" type="button">‹ Trước</button>
+        <span id="albumSongsPageLabel" class="suno-status"></span>
+        <button id="albumSongsNextBtn" class="suno-test-btn suno-btn-ghost" type="button">Sau ›</button>
+      </div>
     </div>
 
     <!-- File Drop Zone -->
@@ -1141,6 +1164,7 @@
             </div>
             <div class="suno-url-hint">Lưu ý: Với Chromium (Chrome/Edge/Brave/Cốc Cốc/Opera/Vivaldi/Yandex), app sẽ <b>đóng tạm thời</b> trình duyệt bạn chọn, mở lại bằng <i>remote debugging</i> để đọc cookie trực tiếp, rồi đóng lại. Với Firefox dùng fallback <b>Copy as cURL</b>.</div>
             <div id="sunoStatus" class="suno-status" role="status" aria-live="polite"></div>
+            <button id="sunoLogoutBtn" class="suno-test-btn suno-btn-ghost suno-full-width-btn" type="button" style="margin-top:14px;" title="Xoá session Suno đang lưu trong app để đăng nhập lại bằng tài khoản Suno khác">🚪 Đăng xuất Suno</button>
           </div>
         </div>
       </div>
@@ -1232,11 +1256,15 @@
          #uploadToggleBtn), không tự viết lại logic upload. -->
     <div id="uploadConfirmModal" class="cm-modal-overlay hidden">
       <div class="cm-modal" style="width:360px;position:relative;" role="dialog" aria-modal="true" aria-label="Tiến trình xử lý">
-        <button id="uploadConfirmLogBtn" type="button" title="Xem nhật ký tiến trình" aria-label="Xem nhật ký tiến trình" style="position:absolute;top:8px;right:8px;background:transparent;border:none;cursor:pointer;font-size:15px;line-height:1;padding:5px;opacity:.6;z-index:1;">☰</button>
+        <button id="uploadConfirmLogBtn" type="button" title="Xem nhật ký tiến trình" aria-label="Xem nhật ký tiến trình" style="position:absolute;top:8px;right:8px;background:transparent;border:none;cursor:pointer;font-size:15px;line-height:1;padding:5px;opacity:.6;z-index:1;" hidden>☰</button>
         <div class="cm-modal-body" style="text-align:center;">
           <div id="uploadConfirmSpinner" class="cm-spinner" aria-hidden="true" style="margin:0 auto;" hidden></div>
           <div id="uploadConfirmMsg" class="suno-status" style="margin:10px 0 6px;"></div>
           <div id="uploadConfirmRunTimer" class="suno-run-timer" hidden></div>
+          <div id="uploadConfirmProgressWrap" class="suno-upload-progress-wrap" hidden>
+            <div class="suno-upload-progress-track"><div id="uploadConfirmProgressBar" class="suno-upload-progress-bar"></div></div>
+            <div id="uploadConfirmProgressPct" class="suno-upload-progress-pct"></div>
+          </div>
           <div id="uploadConfirmTimer" hidden></div>
           <div id="uploadConfirmActions" class="suno-split-step-row" style="gap:8px;" hidden>
             <!-- Tự động upload ngay sau khi cắt xong (xem startAutoUpload) —
@@ -1542,6 +1570,26 @@
       if (openSettingsBtn) openSettingsBtn.addEventListener('click', function () { openModal(settingsModal); });
       if (openDownloadBtn) openDownloadBtn.addEventListener('click', function () { openModal(downloadModal); });
 
+      // ── Đăng xuất Suno (đổi tài khoản) — xoá session đã lưu (suno-session.json)
+      // rồi tải lại trang: logic sẵn có cuối file (DOMContentLoaded khác) tự phát
+      // hiện không còn session hợp lệ và hiện lại #sunoLoginGate để đăng nhập tài
+      // khoản Suno khác. Không đụng tới license Suno Pro (Worker) — chỉ là session
+      // Suno.com của khách. ────────────────────────────────────────────────────
+      var sunoLogoutBtn = document.getElementById('sunoLogoutBtn');
+      if (sunoLogoutBtn) {
+        sunoLogoutBtn.addEventListener('click', function () {
+          var api = window.electronAPI;
+          if (!api || typeof api.sunoSessionClear !== 'function') return;
+          var ok = window.confirm('Đăng xuất tài khoản Suno hiện tại? Bạn sẽ cần đăng nhập lại bằng tài khoản Suno khác.');
+          if (!ok) return;
+          sunoLogoutBtn.disabled = true;
+          sunoLogoutBtn.textContent = 'Đang đăng xuất…';
+          api.sunoSessionClear().finally(function () {
+            window.location.reload();
+          });
+        });
+      }
+
       // ── Menu hamburger (nổi ngoài header) → dropdown "Download Suno" /
       // "Cấu hình đăng nhập" — mỗi mục chỉ mở đúng popup có sẵn ở trên. ────
       var settingsHamburgerBtn = document.getElementById('sunoSettingsHamburgerBtn');
@@ -1577,6 +1625,21 @@
       }
       if (menuOpenSettingsBtn) {
         menuOpenSettingsBtn.addEventListener('click', function () { closeDropdown(); openModal(settingsModal); });
+      }
+      var menuSunoLogoutBtn = document.getElementById('menuSunoLogoutBtn');
+      if (menuSunoLogoutBtn) {
+        menuSunoLogoutBtn.addEventListener('click', function () {
+          closeDropdown();
+          var api = window.electronAPI;
+          if (!api || typeof api.sunoSessionClear !== 'function') return;
+          var ok = window.confirm('Đăng xuất tài khoản Suno hiện tại? Bạn sẽ cần đăng nhập lại bằng tài khoản Suno khác.');
+          if (!ok) return;
+          menuSunoLogoutBtn.disabled = true;
+          menuSunoLogoutBtn.textContent = 'Đang đăng xuất…';
+          api.sunoSessionClear().finally(function () {
+            window.location.reload();
+          });
+        });
       }
       // ── Popup "Thời hạn của Key" — tên + hạn dùng (lấy mới nhất từ Worker
       // qua sunoProLicenseInfo) + nút Đăng xuất Key ngay trong popup. ──────
@@ -1777,8 +1840,7 @@
           var mPriorityDone = /✅\s*đã lấy lại được toàn bộ đoạn sau khi ưu tiên/i.test(rest);
           var mPriorityGiveUp = /⚠\s*sau 3 lần ưu tiên vẫn còn\s*(\d+)\s*đoạn không tải lên được/i.exec(rest);
           var mShrinkRetry = /✂️\s*Đoạn\s*[\d.]+s hơi khó, chia nhỏ còn\s*[\d.]+s để thử tiếp/i.test(rest);
-          var mRateRetry = /⏸\s*(?:\(chế độ cũ\)\s*)?bị giới hạn tốc độ \(lần\s*(\d+)\/8\)/i.exec(rest);
-          var mRateGiveUp = /⏸\s*(?:\(chế độ cũ\)\s*)?vẫn bị giới hạn tốc độ sau 8 lần/i.test(rest);
+          var mRateRetry = /⏸\s*(?:\(chế độ cũ\)\s*)?bị Suno giới hạn tốc độ \(429\)\s*—\s*lần\s*(\d+),\s*(?:Suno yêu cầu chờ đúng|chờ)\s*([\d.]+)s/i.exec(rest);
           var mHttp429 = /✗\s*(?:\(chế độ cũ[^)]*\)\s*)?LỖI:.*\b429\b/i.test(rest);
           var mErr = /✗\s*LỖI:/i.test(rest) && /suno.{0,4}từ chối/i.test(rest);
           if (mCutDoneRandom) {
@@ -1790,37 +1852,48 @@
           } else if (mDone) {
             friendly = 'Hoàn tất - ' + mDone[1] + ' Clip' + (mDone[2] || '');
           } else if (mLost && partNum) {
-            friendly = 'Dữ liệu ' + partNum + ' - Thiếu ' + mLost[1] + ' giây, Suno từ chối dù đã thử nhiều cách kể cả ưu tiên thử lại riêng';
+            friendly = 'Luồng ' + partNum + ' - Thiếu ' + mLost[1] + ' giây, Suno từ chối dù đã thử nhiều cách kể cả ưu tiên thử lại riêng';
           } else if (mPriorityStart && partNum) {
-            friendly = 'Dữ liệu ' + partNum + ' - Có ' + mPriorityStart[1] + ' đoạn khó, tạm dừng phần khác để ưu tiên thử lại';
+            friendly = 'Luồng ' + partNum + ' - Có ' + mPriorityStart[1] + ' luồng khó, tạm dừng phần khác để ưu tiên thử lại';
           } else if (mPriorityRound && partNum) {
-            friendly = 'Dữ liệu ' + partNum + ' - Đang ưu tiên thử lại, lần ' + mPriorityRound[1] + '/3';
+            friendly = 'Luồng ' + partNum + ' - Đang ưu tiên thử lại, lần ' + mPriorityRound[1] + '/3';
           } else if (mPriorityDone && partNum) {
-            friendly = 'Dữ liệu ' + partNum + ' - Đã lấy lại được đoạn bị thiếu, tiếp tục bình thường';
+            friendly = 'Luồng ' + partNum + ' - Đã lấy lại được phần bị thiếu, tiếp tục bình thường';
           } else if (mPriorityGiveUp && partNum) {
-            friendly = 'Dữ liệu ' + partNum + ' - Vẫn còn ' + mPriorityGiveUp[1] + ' đoạn không lấy lại được, đành bỏ qua';
+            friendly = 'Luồng ' + partNum + ' - Vẫn còn ' + mPriorityGiveUp[1] + ' luồng không lấy lại được, đành bỏ qua';
           } else if (mShrinkRetry && partNum) {
-            friendly = 'Dữ liệu ' + partNum + ' - Đang thử phân lại luồng để thử tiếp…';
+            friendly = 'Luồng ' + partNum + ' - Đang thử phân lại luồng để thử tiếp…';
           } else if (mRateRetry && partNum) {
-            friendly = 'Luồng ' + partNum + ' - Bị giới hạn tốc độ, đang xếp lại để thử lại (lần ' + mRateRetry[1] + '/8)';
-          } else if (mRateGiveUp && partNum) {
-            friendly = 'Luồng ' + partNum + ' - Vẫn bị giới hạn tốc độ sau nhiều lần thử lại, đành đánh dấu lỗi';
+            friendly = 'Luồng ' + partNum + ' - Bị Suno giới hạn tốc độ, tự động chờ ' + mRateRetry[2] + 's rồi thử lại (lần ' + mRateRetry[1] + ', không giới hạn số lần — sẽ không bị mất dữ liệu)';
           } else if (mHttp429 && partNum) {
             friendly = 'Luồng ' + partNum + ' - Lỗi: Bị giới hạn tốc độ (quá nhiều yêu cầu cùng lúc)';
           } else if (/✅\s*\(ưu tiên\)\s*tải lên OK/i.test(rest) && partNum) {
-            friendly = 'Dữ liệu ' + partNum + ' - Thử lại ưu tiên thành công 1 đoạn';
+            friendly = 'Luồng ' + partNum + ' - Thử lại ưu tiên thành công 1 phần';
           } else if (/✅\s*mảnh tải lên OK/i.test(rest) && partNum) {
             friendly = 'Tải lên thành công dữ liệu ' + partNum;
           } else if (/▶\s*bắt đầu\s*—\s*cỡ gốc/i.test(rest) && partNum) {
-            friendly = 'Dữ liệu ' + partNum + ' - Bắt đầu đưa lên máy chủ Suno';
+            friendly = 'Luồng ' + partNum + ' - Bắt đầu đưa lên máy chủ Suno';
           } else if (/^đã ghép xong project=/i.test(rest)) {
             friendly = 'Đã ghép hoàn thành trên Suno, hãy kiểm tra trên Suno.';
           } else if (/^đã xuất clip=/i.test(rest)) {
             friendly = 'Đã xuất clip thành công.';
           } else if (mErr && partNum) {
-            friendly = 'Dữ liệu ' + partNum + ' Error : Suno từ chối.';
+            friendly = 'Luồng ' + partNum + ' - Lỗi: Suno từ chối.';
           }
-          rest = friendly || rest.replace(/\bpart\s+(\d+)\b/gi, 'Dữ liệu $1');
+          rest = friendly || rest.replace(/\bpart\s+(\d+)\b/gi, 'Luồng $1');
+          // Lưới an toàn cuối cùng — dù khớp mẫu riêng ở trên hay rơi vào
+          // fallback, không được để sót từ "part"/"cắt"/"phân đoạn"/"đoạn"
+          // (thuật ngữ nội bộ) lọt ra màn hình người dùng; tất cả đổi thành
+          // "luồng" cho nhất quán với tên gọi đã dùng ở tab "Hàng chờ".
+          // Lưu ý: "\b" của JS chỉ coi [A-Za-z0-9_] là ký tự chữ — các từ có
+          // dấu tiếng Việt như "đoạn"/"cắt" bắt đầu/kết thúc bằng ký tự có
+          // dấu nên "\b" không nhận đúng ranh giới. Dùng lookaround dựa trên
+          // \p{L}/\p{N} (cần cờ "u") để khớp đúng "cả từ" bất kể có dấu.
+          rest = rest
+            .replace(/(?<![\p{L}\p{N}])parts?(?![\p{L}\p{N}])/giu, 'luồng')
+            .replace(/(?<![\p{L}\p{N}])phân đoạn(?![\p{L}\p{N}])/giu, 'luồng')
+            .replace(/(?<![\p{L}\p{N}])đoạn(?![\p{L}\p{N}])/giu, 'luồng')
+            .replace(/(?<![\p{L}\p{N}])cắt(?![\p{L}\p{N}])/giu, 'xử lý');
 
           return { time: time, partNum: partNum, kind: kind, icon: icon, text: rest };
         }
@@ -1846,7 +1919,7 @@
             var cls = 'sp-log-row sp-log-row--' + row.kind + (idx % 2 ? ' sp-log-odd' : '');
             return '<div class="' + cls + '">' +
               (row.time ? '<span class="sp-log-time">' + row.time + '</span>' : '') +
-              (row.partNum ? '<span class="sp-log-part">Dữ liệu ' + row.partNum + '</span>' : '') +
+              (row.partNum ? '<span class="sp-log-part">Luồng ' + row.partNum + '</span>' : '') +
               '<span class="sp-log-icon">' + row.icon + '</span>' +
               '<span class="sp-log-msg">' + (escapeHtml(row.text) || '&nbsp;') + '</span>' +
               '</div>';
@@ -2305,6 +2378,7 @@
       var uploadConfirmNewBtn = document.getElementById('uploadConfirmNewBtn');
       var uploadConfirmTimer = document.getElementById('uploadConfirmTimer');
       var uploadConfirmRunTimer = document.getElementById('uploadConfirmRunTimer');
+      var uploadConfirmProgressWrap = document.getElementById('uploadConfirmProgressWrap');
       var pendingAutoStage = null; // 'afterCut' | 'afterUpload' | 'afterAssemble' | 'afterExport'
       var userCancelledCurrentRun = false; // true nếu bấm "Loại bỏ" khi đang dọn dẹp — tránh popup tự mở lại
       // Độ dài bài (giây) — lấy từ chính dòng text bundle gốc in ra sau khi
@@ -2799,6 +2873,10 @@
         if (uploadConfirmForceAssembleBtn) uploadConfirmForceAssembleBtn.hidden = false;
         if (uploadConfirmNoBtn) uploadConfirmNoBtn.disabled = false;
         if (uploadConfirmMsg) { uploadConfirmMsg.textContent = withQueueLabel(text); uploadConfirmMsg.className = 'suno-status'; }
+        // Thanh % tiến trình upload — giá trị % do kn() trong main-*.js tự
+        // tính và cập nhật trực tiếp vào #uploadConfirmProgressBar/-Pct mỗi
+        // khi có luồng đổi trạng thái; ở đây chỉ bật/tắt cả khung theo pha.
+        if (uploadConfirmProgressWrap) uploadConfirmProgressWrap.hidden = false;
         // Khung dưới đây (vốn chỉ hiện đồng hồ) giờ hiện TÊN BÀI đang upload
         // (1 dòng, cắt bớt kèm "…" nếu dài — xem .suno-timer-songname trong
         // custom-polish.css); đồng hồ thật nằm riêng ở #uploadConfirmRunTimer
@@ -2824,6 +2902,7 @@
         if (uploadConfirmActions) uploadConfirmActions.hidden = true;
         if (uploadConfirmForceAssembleBtn) uploadConfirmForceAssembleBtn.hidden = true;
         if (uploadConfirmDoneActions) uploadConfirmDoneActions.hidden = false;
+        if (uploadConfirmProgressWrap) uploadConfirmProgressWrap.hidden = true;
         // Tách câu trạng thái chính (đậm) khỏi câu hỏi phụ ("Bạn có muốn…")
         // thành 2 dòng riêng thay vì 1 câu dài căn giữa dễ ngắt dòng xấu.
         if (uploadConfirmMsg) {
@@ -2888,6 +2967,7 @@
         if (uploadConfirmMsg) { uploadConfirmMsg.textContent = withQueueLabel(text); uploadConfirmMsg.className = 'suno-status err'; }
         stopProcessTimer();
         if (uploadConfirmRunTimer) uploadConfirmRunTimer.hidden = true;
+        if (uploadConfirmProgressWrap) uploadConfirmProgressWrap.hidden = true;
         if (uploadConfirmTimer) { uploadConfirmTimer.hidden = true; uploadConfirmTimer.classList.remove('suno-timer-songname'); }
         if (pipelineDoneCallback) {
           var errCb = pipelineDoneCallback;
@@ -3170,6 +3250,15 @@
         if (document.body.classList.contains('sunopro-locked')) return;
         var gateOverlay2 = document.getElementById('albumsGateOverlay');
         if (gateOverlay2 && !gateOverlay2.hidden) return;
+        // Đổi height sang 'auto' rồi đổi lại để đo khiến trình duyệt tự reset
+        // scrollTop của .main-content về 0 (nó là container scroll thật —
+        // xem overflow-y:auto trong main-CtjhM9ST.css) — hàm này bị gọi lại
+        // qua MutationObserver mỗi khi nội dung bên trong đổi (vd. danh sách
+        // bài trong Album tự refresh trong lúc có bài đang xử lý), nên nếu
+        // không lưu/khôi phục lại vị trí cuộn, người dùng đang kéo xuống xem
+        // sẽ liên tục bị bắn ngược lên đầu. Lưu lại trước, khôi phục sau khi
+        // resize xong.
+        var prevScrollTop = mainContentEl.scrollTop;
         var prevFlex = mainContentEl.style.flex;
         var prevHeight = mainContentEl.style.height;
         mainContentEl.style.flex = '0 0 auto';
@@ -3177,6 +3266,7 @@
         var contentHeight = mainContentEl.scrollHeight;
         mainContentEl.style.flex = prevFlex;
         mainContentEl.style.height = prevHeight;
+        mainContentEl.scrollTop = prevScrollTop;
         var h = topBarEl.offsetHeight + contentHeight;
         window.electronAPI.resizeWindowToContent(h);
       }
@@ -3821,12 +3911,21 @@
       var errorEl = document.getElementById('sunoProLicenseError');
       var submitBtn = document.getElementById('sunoProLicenseSubmit');
       var buyKeyBtn = document.getElementById('sunoProBuyKeyBtn');
+      var trialKeyBtn = document.getElementById('sunoProTrialKeyBtn');
       var api = window.electronAPI;
 
       if (buyKeyBtn) {
         buyKeyBtn.addEventListener('click', function () {
           if (api && typeof api.openExternal === 'function') {
             api.openExternal('https://suno-pro-worker.vudungit92.workers.dev/mua-key');
+          }
+        });
+      }
+
+      if (trialKeyBtn) {
+        trialKeyBtn.addEventListener('click', function () {
+          if (api && typeof api.openExternal === 'function') {
+            api.openExternal('https://suno-pro-worker.vudungit92.workers.dev/huong-dan');
           }
         });
       }
@@ -3926,9 +4025,75 @@
         });
       })();
 
+      // Nhật ký tiến trình chỉ dành cho KEY hệ thống (role "owner" — bearer token
+      // khớp API_TOKEN bí mật của Worker, xem auth.ts::authorize/me) — mọi KEY
+      // khách hàng thường (role "desktop") đều ẩn hết cả mục menu lẫn icon ☰
+      // trên popup tiến trình. Mặc định HTML đã để "hidden" sẵn (an toàn khi
+      // chưa kịp xác minh) — hàm này chỉ GỠ hidden khi xác nhận đúng là owner.
+      function applySystemKeyVisibility(isSystemKey) {
+        window.__sunoIsSystemKey = !!isSystemKey;
+        var logMenuItem = document.getElementById('menuOpenLogViewerBtn');
+        var logPopupIcon = document.getElementById('uploadConfirmLogBtn');
+        if (logMenuItem) logMenuItem.hidden = !isSystemKey;
+        if (logPopupIcon) logPopupIcon.hidden = !isSystemKey;
+      }
+      function refreshSystemKeyVisibility() {
+        if (!api || typeof api.sunoProLicenseInfo !== 'function') { applySystemKeyVisibility(false); return Promise.resolve(false); }
+        return api.sunoProLicenseInfo().then(function (res) {
+          var isSystemKey = !!(res && res.ok && res.role === 'owner');
+          applySystemKeyVisibility(isSystemKey);
+          return isSystemKey;
+        }).catch(function () { applySystemKeyVisibility(false); return false; });
+      }
+
+      // ── Kiểm tra phiên bản app — gọi NGAY sau khi đã biết role (owner hay
+      // khách hàng thường), vì 2 role xử lý khác nhau hẳn:
+      //   - Khách hàng thường + phiên bản cũ hơn bản mới nhất → CHẶN HẲN, không
+      //     có nút bỏ qua, chỉ có "Download Update" (mở đúng link win/mac).
+      //   - KEY hệ thống (owner) → chỉ hiện thông báo số phiên bản, bấm "Đồng ý"
+      //     là qua luôn, không tự chặn chính mình dù đang chạy bản cũ để test.
+      var appVersionGate = document.getElementById('appVersionGate');
+      var appVersionGateTitle = document.getElementById('appVersionGateTitle');
+      var appVersionGateMsg = document.getElementById('appVersionGateMsg');
+      var appVersionDownloadBtn = document.getElementById('appVersionDownloadBtn');
+      var appVersionAgreeBtn = document.getElementById('appVersionAgreeBtn');
+      var appVersionDownloadUrl = '';
+      if (appVersionDownloadBtn) {
+        appVersionDownloadBtn.addEventListener('click', function () {
+          if (appVersionDownloadUrl && api && typeof api.openExternal === 'function') api.openExternal(appVersionDownloadUrl);
+        });
+      }
+      if (appVersionAgreeBtn) {
+        appVersionAgreeBtn.addEventListener('click', function () {
+          if (appVersionGate) appVersionGate.hidden = true;
+          document.body.classList.remove('sunopro-locked');
+        });
+      }
+      function checkAppVersionGate(isSystemKey) {
+        if (!api || typeof api.appCheckVersion !== 'function' || !appVersionGate) return;
+        api.appCheckVersion().then(function (res) {
+          if (!res || !res.ok || !res.outdated) return; // lỗi mạng hoặc đã mới nhất — không làm phiền
+          appVersionDownloadUrl = res.downloadUrl || '';
+          if (isSystemKey) {
+            appVersionGateTitle.textContent = 'Có bản cập nhật mới';
+            appVersionGateMsg.textContent = 'Phiên bản mới nhất: ' + res.latestVersion + ' (bạn đang dùng ' + res.currentVersion + ').';
+            appVersionDownloadBtn.hidden = !appVersionDownloadUrl;
+            appVersionAgreeBtn.hidden = false;
+          } else {
+            appVersionGateTitle.textContent = 'Cần cập nhật Suno Pro';
+            appVersionGateMsg.textContent = 'Phiên bản bạn đang dùng (' + res.currentVersion + ') đã cũ. Cần cập nhật lên ' + res.latestVersion + ' để tiếp tục sử dụng.';
+            appVersionDownloadBtn.hidden = !appVersionDownloadUrl;
+            appVersionAgreeBtn.hidden = true; // khách hàng thường — không có nút bỏ qua
+          }
+          appVersionGate.hidden = false;
+          document.body.classList.add('sunopro-locked');
+        }).catch(function () { /* lỗi mạng — im lặng, không chặn người dùng vì chuyện phụ này */ });
+      }
+
       function unlock() {
         document.body.classList.remove('sunopro-locked');
         gate.hidden = true;
+        refreshSystemKeyVisibility().then(checkAppVersionGate);
       }
 
       function relock(message) {
@@ -3936,6 +4101,8 @@
         gate.hidden = false;
         clearKeyBoxes();
         showForm(message);
+        applySystemKeyVisibility(false);
+        if (appVersionGate) appVersionGate.hidden = true;
       }
 
       // Dùng chung giữa các <script> block khác nhau (xem menu hamburger bên
@@ -4196,6 +4363,9 @@
         // Màn làm việc của 1 album là "trang con" của Danh sách album — hiện
         // nút Quay lại ở thanh phụ (cùng hành vi với #currentAlbumBtn).
         if (subToolbarBackBtn) subToolbarBackBtn.hidden = false;
+        albumSongsPage = 1;
+        if (albumSongsSearchInput) albumSongsSearchInput.value = '';
+        fetchAlbumStats(album.id);
         refreshAlbumSongs();
       }
 
@@ -4210,8 +4380,15 @@
       var albumStatsEndTime = document.getElementById('albumStatsEndTime');
       var albumStatsEndDate = document.getElementById('albumStatsEndDate');
       var albumStatsTotalTime = document.getElementById('albumStatsTotalTime');
-      var albumSongsCache = []; // bài đã lưu (done) của album đang mở — refetch mỗi lần refreshAlbumSongs
+      var albumSongsCache = []; // CHỈ trang hiện tại (10 bài/trang) — không phải cả album
       var albumSongsFilter = 'all'; // 'all' | 'running' | 'done' | 'failed'
+      var albumSongsPagination = document.getElementById('albumSongsPagination');
+      var albumSongsPrevBtn = document.getElementById('albumSongsPrevBtn');
+      var albumSongsNextBtn = document.getElementById('albumSongsNextBtn');
+      var albumSongsPageLabel = document.getElementById('albumSongsPageLabel');
+      var ALBUM_SONGS_PAGE_SIZE = 10;
+      var albumSongsPage = 1; // trang "Hoàn tất" đang xem (1-based) — reset về 1 mỗi khi mở lại album/đổi filter/tìm kiếm
+      var albumSongsTotalDone = 0;
 
       function pad2(n) { return String(n).padStart(2, '0'); }
       function albumRowTimeLabel(ts) {
@@ -4230,21 +4407,27 @@
       // bấm Cắt đoạn tự động tới lúc ghi xong songsAdd), khác với "Bài đầy đủ
       // dài Ns" ở mỗi dòng bài hát (độ dài AUDIO của bài). Bài cũ (lưu trước
       // khi có startedAt/finishedAt) bị bỏ qua khi tính, không gây lệch.
-      function renderAlbumStats(songs) {
+      // Nhận thẳng kết quả gọn từ IPC songsAlbumStats (tính trên TOÀN BỘ bài
+      // của album, không phụ thuộc trang đang xem) — không còn cần kéo cả
+      // mảng bài hát qua đây chỉ để tính thống kê.
+      function renderAlbumStats(stats) {
         if (!albumStatsCard) return;
-        var timed = songs.filter(function (s) { return s.startedAt && s.finishedAt && s.finishedAt > s.startedAt; });
-        if (!timed.length) { albumStatsCard.hidden = true; return; }
+        if (!stats || !stats.hasStats) { albumStatsCard.hidden = true; return; }
         albumStatsCard.hidden = false;
-        var earliestStart = Math.min.apply(null, timed.map(function (s) { return s.startedAt; }));
-        var latestEnd = Math.max.apply(null, timed.map(function (s) { return s.finishedAt; }));
-        var totalSec = timed.reduce(function (sum, s) { return sum + (s.finishedAt - s.startedAt) / 1000; }, 0);
-        var start = albumStatsTimeParts(earliestStart);
-        var end = albumStatsTimeParts(latestEnd);
+        var start = albumStatsTimeParts(stats.earliestStart);
+        var end = albumStatsTimeParts(stats.latestEnd);
         if (albumStatsStartTime) albumStatsStartTime.textContent = start.time;
         if (albumStatsStartDate) albumStatsStartDate.textContent = start.date;
         if (albumStatsEndTime) albumStatsEndTime.textContent = end.time;
         if (albumStatsEndDate) albumStatsEndDate.textContent = end.date;
-        if (albumStatsTotalTime) albumStatsTotalTime.textContent = formatAlbumDuration(totalSec);
+        if (albumStatsTotalTime) albumStatsTotalTime.textContent = formatAlbumDuration(stats.totalSec);
+      }
+      function fetchAlbumStats(albumId) {
+        if (!window.electronAPI || typeof window.electronAPI.songsAlbumStats !== 'function') return;
+        window.electronAPI.songsAlbumStats({ albumId: albumId }).then(function (stats) {
+          if (!window.sunoCurrentAlbum || window.sunoCurrentAlbum.id !== albumId) return;
+          renderAlbumStats(stats);
+        }).catch(function () {});
       }
 
       function renderAlbumSongsList() {
@@ -4253,9 +4436,9 @@
         var queueItems = Array.isArray(window.sunoQueue) ? window.sunoQueue : [];
         var runningItems = queueItems.filter(function (q) { return q.state === 'running' || q.state === 'waiting'; });
         var failedItems = queueItems.filter(function (q) { return q.state === 'failed'; });
-        var doneSongs = albumSongsCache;
+        var doneSongs = albumSongsCache; // chỉ đúng 1 trang — xem refreshAlbumSongs()
 
-        if (albumSongsDoneCount) albumSongsDoneCount.textContent = '(' + doneSongs.length + ')';
+        if (albumSongsDoneCount) albumSongsDoneCount.textContent = '(' + albumSongsTotalDone + ')';
         if (albumSongsCount) {
           var nowD = new Date();
           albumSongsCount.textContent = 'Cập nhật ' + pad2(nowD.getHours()) + ':' + pad2(nowD.getMinutes());
@@ -4269,13 +4452,28 @@
           failedItems.forEach(function (q) { rows.push({ type: 'queue', state: q.state, item: q }); });
         }
         if (albumSongsFilter === 'all' || albumSongsFilter === 'done') {
+          // doneSongs đã được lọc theo `query` ngay ở IPC (songsList) khi tải
+          // trang này — chỉ còn cần lọc cục bộ cho các dòng "queue" bên dưới.
           doneSongs.forEach(function (s) { rows.push({ type: 'song', item: s }); });
         }
         if (query) {
           rows = rows.filter(function (r) {
-            var label = r.type === 'song' ? r.item.title : r.item.label;
-            return String(label || '').toLowerCase().indexOf(query) !== -1;
+            if (r.type !== 'queue') return true;
+            return String(r.item.label || '').toLowerCase().indexOf(query) !== -1;
           });
+        }
+
+        // Phân trang chỉ áp dụng cho danh sách "Hoàn tất" — hiện khi tab
+        // đang xem có thể chứa bài đã lưu (all/done) và có nhiều hơn 1 trang.
+        if (albumSongsPagination) {
+          var showPaging = (albumSongsFilter === 'all' || albumSongsFilter === 'done') && albumSongsTotalDone > ALBUM_SONGS_PAGE_SIZE;
+          albumSongsPagination.hidden = !showPaging;
+          if (showPaging) {
+            var totalPages = Math.max(1, Math.ceil(albumSongsTotalDone / ALBUM_SONGS_PAGE_SIZE));
+            if (albumSongsPageLabel) albumSongsPageLabel.textContent = 'Trang ' + albumSongsPage + '/' + totalPages;
+            if (albumSongsPrevBtn) albumSongsPrevBtn.disabled = albumSongsPage <= 1;
+            if (albumSongsNextBtn) albumSongsNextBtn.disabled = albumSongsPage >= totalPages;
+          }
         }
 
         albumSongsList.innerHTML = '';
@@ -4342,19 +4540,40 @@
         });
       }
 
+      // Chỉ xin ĐÚNG 1 trang (10 bài, mới nhất trước) mỗi lần — không tải cả
+      // album — đổi trang/tìm kiếm mới gọi lại IPC, tránh tốn tài nguyên khi
+      // album có nhiều bài. Thống kê (renderAlbumStats) tách riêng, không phụ
+      // thuộc trang đang xem — xem fetchAlbumStats().
       function refreshAlbumSongs() {
         if (!albumSongsList || !window.sunoCurrentAlbum || !window.electronAPI || typeof window.electronAPI.songsList !== 'function') return;
         var albumId = window.sunoCurrentAlbum.id;
-        window.electronAPI.songsList({ albumId: albumId }).then(function (res) {
+        var query = ((albumSongsSearchInput && albumSongsSearchInput.value) || '').trim();
+        var offset = (albumSongsPage - 1) * ALBUM_SONGS_PAGE_SIZE;
+        window.electronAPI.songsList({ albumId: albumId, limit: ALBUM_SONGS_PAGE_SIZE, offset: offset, query: query || undefined }).then(function (res) {
           // Bỏ qua nếu người dùng đã chuyển sang album khác trong lúc đợi.
           if (!window.sunoCurrentAlbum || window.sunoCurrentAlbum.id !== albumId) return;
-          albumSongsCache = ((res && res.songs) || []).slice().reverse();
-          renderAlbumStats(albumSongsCache);
+          albumSongsCache = (res && res.songs) || [];
+          albumSongsTotalDone = (res && res.total) || 0;
           renderAlbumSongsList();
         }).catch(function () {});
       }
       if (albumSongsSearchInput) {
-        albumSongsSearchInput.addEventListener('input', renderAlbumSongsList);
+        albumSongsSearchInput.addEventListener('input', function () { albumSongsPage = 1; refreshAlbumSongs(); });
+      }
+      if (albumSongsPrevBtn) {
+        albumSongsPrevBtn.addEventListener('click', function () {
+          if (albumSongsPage <= 1) return;
+          albumSongsPage -= 1;
+          refreshAlbumSongs();
+        });
+      }
+      if (albumSongsNextBtn) {
+        albumSongsNextBtn.addEventListener('click', function () {
+          var totalPages = Math.max(1, Math.ceil(albumSongsTotalDone / ALBUM_SONGS_PAGE_SIZE));
+          if (albumSongsPage >= totalPages) return;
+          albumSongsPage += 1;
+          refreshAlbumSongs();
+        });
       }
       if (albumSongsTabs) {
         albumSongsTabs.querySelectorAll('.album-songs-tab').forEach(function (btn) {

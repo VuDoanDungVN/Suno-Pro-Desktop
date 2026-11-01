@@ -119,11 +119,19 @@ export async function broadcastStart(request: Request, env: Env): Promise<Respon
   return json(jobView(job));
 }
 
-/** `GET /admin/trial-leads/broadcast/:id` — trang admin gọi lặp lại; mỗi lần gọi vừa trả tiến độ
- * vừa tự gửi tiếp 1 email nếu đã đủ giãn cách (xem ghi chú ở đầu file). */
+/** `GET /admin/trial-leads/broadcast/:id` — trang admin gọi lặp lại (mỗi 1.5s); mỗi lần gọi vừa
+ * trả tiến độ vừa tự gửi tiếp 1 email nếu đã đủ giãn cách (xem ghi chú ở đầu file).
+ *
+ * CHỈ ghi lại `job` vào D1 khi `advance()` THỰC SỰ thay đổi gì đó (vừa gửi xong 1 email, hoặc vừa
+ * chuyển sang "done") — trước đây ghi lại nguyên khối JSON (gồm CẢ danh sách email người nhận) ở
+ * MỌI lần poll, kể cả lúc chưa tới giãn cách và chẳng có gì thay đổi. Với chiến dịch vài nghìn
+ * email + giãn cách vài giây, số lần poll (và số lần ghi D1 kiểu "ghi cả blob lớn") có thể lên tới
+ * hàng nghìn/chiến dịch — đây là 1 nguồn chính khiến quota ghi D1 bị ngốn nhanh. */
 export async function broadcastStatus(env: Env, id: string): Promise<Response> {
-  let job = await loadJob(env, id);
-  job = await advance(env, job);
-  await saveJob(env, job);
-  return json(jobView(job));
+  const job = await loadJob(env, id);
+  const before = job.index;
+  const beforeStatus = job.status;
+  const after = await advance(env, job);
+  if (after.index !== before || after.status !== beforeStatus) await saveJob(env, after);
+  return json(jobView(after));
 }

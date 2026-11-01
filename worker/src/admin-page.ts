@@ -235,6 +235,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
         <button class="btn ghost" id="view-leads" type="button"></button>
         <button class="btn ghost" id="view-payments" type="button"></button>
         <button class="btn ghost" id="broadcast-key" type="button"></button>
+        <button class="btn ghost" id="renew-trial" type="button"></button>
         <button class="btn ghost" id="cleanup-trial" type="button"></button>
         <button class="btn" id="bulk-key" type="button"></button>
         <button class="btn primary" id="new-key" type="button"></button>
@@ -262,6 +263,12 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
         <button class="btn sm" id="download-url-mac-save" type="button"></button>
       </div>
       <span class="sub">2 nút "Tải cho Windows"/"Tải cho macOS" ở trang <code>/huong-dan</code> dùng các link này — đổi ở đây có hiệu lực ngay, không cần deploy lại.</span>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:2px">
+        <strong style="white-space:nowrap;min-width:150px">Phiên bản mới nhất</strong>
+        <input class="input" id="app-version-input" style="max-width:160px" maxlength="40" placeholder="vd: 2.5.0">
+        <button class="btn sm" id="app-version-save" type="button"></button>
+        <span class="sub" style="flex:1 1 220px">App khởi động sẽ so với số này (qua KEY đang dùng) — khác thì bắt cập nhật (KEY hệ thống chỉ cảnh báo, không bị chặn).</span>
+      </div>
     </section>
 
     <div class="toolbar">
@@ -513,6 +520,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
       load();
       loadTrialCode();
       loadDownloadUrl();
+      loadAppVersion();
     } else {
       loginView.hidden = false;
       appView.hidden = true;
@@ -713,12 +721,14 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   $("#new-key").innerHTML = icon("plus") + "Tạo key";
   $("#bulk-key").innerHTML = icon("plus") + "Tạo hàng loạt";
   $("#cleanup-trial").innerHTML = icon("trash") + "Xoá trial hết hạn";
+  $("#renew-trial").innerHTML = icon("clock") + "Gia hạn trial hết hạn +1 ngày";
   $("#view-leads").innerHTML = icon("users") + "Email đăng ký";
   $("#view-payments").innerHTML = icon("refresh") + "Dòng tiền";
   $("#broadcast-key").innerHTML = icon("refresh") + "Gửi mail hàng loạt";
   $("#trial-code-save").innerHTML = icon("check") + "Lưu mã";
   $("#download-url-win-save").innerHTML = icon("check") + "Lưu link";
   $("#download-url-mac-save").innerHTML = icon("check") + "Lưu link";
+  $("#app-version-save").innerHTML = icon("check") + "Lưu";
   $("#copy").innerHTML = icon("copy") + "Sao chép key";
 
   async function loadTrialCode() {
@@ -748,6 +758,16 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   }
   wireDownloadUrlSave("win", "#download-url-win-input", "#download-url-win-save");
   wireDownloadUrlSave("mac", "#download-url-mac-input", "#download-url-mac-save");
+
+  async function loadAppVersion() {
+    try { const res = await apiFetch("/admin/app-version"); $("#app-version-input").value = res.version || ""; } catch { /* im lặng — không chặn trang chính */ }
+  }
+  $("#app-version-save").addEventListener("click", async () => {
+    const version = $("#app-version-input").value.trim();
+    if (!version) return toast("Nhập số phiên bản trước khi lưu.", "bad");
+    try { await apiFetch("/admin/app-version", { method: "POST", body: JSON.stringify({ version }) }); toast("Đã lưu phiên bản mới nhất: " + version); }
+    catch (error) { toast(error.message, "bad"); }
+  });
 
   $("#tabs").addEventListener("click", (e) => { const tab = e.target.closest("[data-tab]"); if (!tab) return; filter = tab.dataset.tab; currentPage = 1; render(); });
   $("#trial-only").addEventListener("change", () => { currentPage = 1; render(); });
@@ -1005,6 +1025,15 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     try {
       const res = await apiFetch("/admin/licenses/trial/expired", { method: "DELETE" });
       toast("Đã xoá " + res.deleted + " key dùng thử hết hạn");
+      await load({ quiet: true });
+    } catch (error) { toast(error.message, "bad"); }
+  });
+
+  $("#renew-trial").addEventListener("click", async () => {
+    if (!confirm("Gia hạn thêm 1 ngày cho TẤT CẢ key dùng thử đã hết hạn? Chỉ áp dụng cho key dùng thử (không đụng tới key khách trả phí).")) return;
+    try {
+      const res = await apiFetch("/admin/licenses/trial/renew-expired", { method: "POST" });
+      toast("Đã gia hạn +1 ngày cho " + res.renewed + " key dùng thử");
       await load({ quiet: true });
     } catch (error) { toast(error.message, "bad"); }
   });

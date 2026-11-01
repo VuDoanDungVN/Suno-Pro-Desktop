@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // trên: các thao tác gọi Suno (upload/ghép/export/dọn dẹp) đòi hỏi 1 trong
   // các API này đã kích hoạt thành công trước đó.
   sunoProLicenseStatus: () => ipcRenderer.invoke('sunopro-license-status'),
+  appCheckVersion: () => ipcRenderer.invoke('app-check-version'),
   sunoProLicenseInfo: () => ipcRenderer.invoke('sunopro-license-info'),
   sunoProLicenseActivate: (payload) => ipcRenderer.invoke('sunopro-license-activate', payload),
   sunoProLicenseLogout: () => ipcRenderer.invoke('sunopro-license-logout'),
@@ -65,6 +66,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sunoSessionLoad: () => ipcRenderer.invoke('suno-session-load'),
   sunoSessionSave: (session) => ipcRenderer.invoke('suno-session-save', session),
   sunoVerify: (session) => ipcRenderer.invoke('suno-verify', session),
+  sunoSessionClear: () => ipcRenderer.invoke('suno-session-clear'),
   sunoUpload: (payload) => ipcRenderer.invoke('suno-upload', payload),
   sunoNotify: (payload) => ipcRenderer.invoke('suno-notify', payload),
   onSunoUploadProgress: (callback) => {
@@ -124,6 +126,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // when that album was later deleted (then it's null = "Chưa phân loại").
   songsAdd: (payload) => ipcRenderer.invoke('songs-add', payload),
   songsList: (payload) => ipcRenderer.invoke('songs-list', payload),
+  songsAlbumStats: (payload) => ipcRenderer.invoke('songs-album-stats', payload),
   songsUpdate: (payload) => ipcRenderer.invoke('songs-update', payload),
   songsDelete: (payload) => ipcRenderer.invoke('songs-delete', payload),
 

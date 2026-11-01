@@ -1904,6 +1904,32 @@ label[for="albumFirstRunName"] {
   font-size: 11px;
   color: var(--text-secondary);
 }
+/* Thanh % tiến trình upload — tính theo tổng số giây các luồng đã xong
+   (done/failed) trên tổng số giây toàn bộ bài (xem kn() trong main-*.js),
+   không phải theo số luồng thô, vì mỗi luồng giờ dài ngẫu nhiên 8-10s khác
+   nhau nên tính theo giây phản ánh đúng % bài hát hơn. */
+.suno-upload-progress-wrap { margin: 0 0 12px; }
+.suno-upload-progress-track {
+  width: 100%; height: 8px; background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 999px; overflow: hidden;
+}
+.suno-upload-progress-bar {
+  height: 100%; width: 0%; background: var(--green); border-radius: 999px;
+  transition: width .3s ease;
+}
+/* Thanh phân trang danh sách "Hoàn tất" trong 1 Album — chỉ tải 10 bài mới
+   nhất mỗi trang (xem refreshAlbumSongs() trong index.html), bấm Trước/Sau
+   mới gọi IPC lấy trang kế tiếp, không tải cả album 1 lượt. */
+.suno-upload-pagination[hidden] { display: none; }
+.suno-upload-pagination {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin-top: 10px;
+}
+.suno-upload-pagination button:disabled { opacity: .4; cursor: default; }
+.suno-upload-progress-pct {
+  margin-top: 5px; text-align: center; font-size: 12px; font-weight: 600;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
 #uploadConfirmTimer {
   margin: 10px 0 14px;
   padding: 8px 10px;

@@ -84,7 +84,22 @@ function sunoJwtSub(token: string): string {
   }
 }
 
-async function sunoRequest(url: string, options: RequestInit = {}): Promise<{ status: number; ok: boolean; json: any }> {
+/** Đọc header `Retry-After` thật mà Suno trả về (giây hoặc HTTP-date) — để app chờ ĐÚNG khoảng
+ * Suno yêu cầu thay vì tự đoán. Port 1:1 của extension Chrome chính chủ (hàm bs()/pe() trong
+ * src/cvt3.js) — đây chính là lý do extension gần như không bao giờ bị Suno chặn hẳn. */
+function parseRetryAfterMs(res: Response): number | null {
+  const h = res.headers.get("retry-after");
+  if (!h) return null;
+  const n = Number(h);
+  if (Number.isFinite(n)) return n >= 0 ? Math.round(n * 1000) : null;
+  const t = Date.parse(h);
+  return Number.isFinite(t) ? Math.max(0, t - Date.now()) : null;
+}
+
+async function sunoRequest(
+  url: string,
+  options: RequestInit = {},
+): Promise<{ status: number; ok: boolean; json: any; retryAfterMs: number | null }> {
   const res = await fetch(url, options);
   const text = await res.text();
   let data: any = {};
@@ -93,7 +108,20 @@ async function sunoRequest(url: string, options: RequestInit = {}): Promise<{ st
   } catch {
     data = { raw: text.slice(0, 300) };
   }
-  return { status: res.status, ok: res.ok, json: data };
+  const retryAfterMs = res.status === 429 ? parseRetryAfterMs(res) : null;
+  return { status: res.status, ok: res.ok, json: data, retryAfterMs };
+}
+
+/** Ném lỗi chuẩn hoá cho 1 lệnh gọi Suno thất bại trong luồng upload — tách riêng 429 (giới hạn
+ * tốc độ, kèm retryAfterMs nếu Suno có báo) khỏi các lỗi khác, để app không còn bị "giấu" lỗi 429
+ * dưới dạng suno_error/polling vô tận nữa (xem uploadStatus/uploadInitializeClip trước đây không
+ * hề kiểm tra res.ok nên 429 lọt qua thành "đang xử lý" hoặc "thiếu clip ID" rất khó hiểu). */
+function throwOnSunoUploadError(res: { status: number; ok: boolean; json: any; retryAfterMs: number | null }, context: string): void {
+  if (res.ok) return;
+  if (res.status === 429) {
+    throw new HttpError(429, "rate_limited", `${context}: Suno đang giới hạn tốc độ (429).`, res.retryAfterMs ?? undefined);
+  }
+  throw new HttpError(502, "suno_error", `${context}: HTTP ${res.status} ${JSON.stringify(res.json).slice(0, 220)}`);
 }
 
 /** Port của `sunoStudioFetch()` — thử lần lượt 2 host, bỏ qua 404 để fallback. */
@@ -223,7 +251,7 @@ export async function uploadInit(request: Request, _env: Env): Promise<Response>
     headers: { ...sunoBaseHeaders(session), "Content-Type": "application/json" },
     body: JSON.stringify({ extension, upload_type: "studio_file_upload" }),
   });
-  if (!res.ok) throw new HttpError(502, "suno_error", `Mở phiên upload thất bại: HTTP ${res.status} ${JSON.stringify(res.json).slice(0, 220)}`);
+  throwOnSunoUploadError(res, "Mở phiên upload thất bại");
   const nested = res.json?.upload && typeof res.json.upload === "object" ? res.json.upload : {};
   const url = res.json.url || nested.url || "";
   const fields = res.json.fields || nested.fields || {};
@@ -244,7 +272,7 @@ export async function uploadFinish(request: Request, _env: Env): Promise<Respons
     headers: { ...sunoBaseHeaders(session), "Content-Type": "application/json" },
     body: JSON.stringify({ upload_type: "studio_file_upload", upload_filename: filename }),
   });
-  if (!res.ok) throw new HttpError(502, "suno_error", `Hoàn tất upload thất bại: HTTP ${res.status}`);
+  throwOnSunoUploadError(res, "Hoàn tất upload thất bại");
   return json({ ok: true });
 }
 
@@ -255,6 +283,7 @@ export async function uploadStatus(request: Request, _env: Env): Promise<Respons
   const uploadId = cleanText(body.uploadId, 100);
   if (!uploadId) throw new HttpError(400, "missing_upload_id", "Thiếu uploadId.");
   const res = await sunoRequest(`${SUNO_API}/api/uploads/audio/${uploadId}/`, { method: "GET", headers: sunoBaseHeaders(session) });
+  throwOnSunoUploadError(res, "Kiểm tra trạng thái upload thất bại");
   const row = res.json?.data ?? res.json ?? {};
   const status = String(row.status || row.state || "").toLowerCase();
   const clipId = row.clip_id || row.clipId || row.song_id || null;
@@ -282,6 +311,7 @@ export async function uploadInitializeClip(request: Request, _env: Env): Promise
     headers: { ...sunoBaseHeaders(session), "Content-Type": "application/json" },
     body: JSON.stringify({ user_reviewed_tags: true }),
   });
+  throwOnSunoUploadError(res, "Ghi bài vào thư viện thất bại");
   const clipId = res.json.clip_id || res.json.clipId || res.json.song_id || res.json.id || null;
   const muted = res.json?.copyright_muted === true;
   // Best-effort metadata (bỏ qua lỗi) — giống nguyên bước 6 của sunoUploadAudio().
