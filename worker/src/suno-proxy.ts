@@ -891,47 +891,64 @@ async function listAllClipsByTitleFilter(session: SunoSession, userId: string, t
   return matches;
 }
 
-/** `POST /suno/trash-by-title { title, excludeIds?, maxAgeMs? }` — dọn các clip KHÁC xuất hiện
- * trong thư viện với title TRÙNG CHÍNH XÁC `title` (không phải chỉ chứa), loại trừ các id trong
- * `excludeIds`, chỉ xét clip MỚI tạo trong `maxAgeMs` gần nhất (mặc định 10 phút) để tránh đụng
- * nhầm 1 bài khác cùng tên user tự upload từ trước không liên quan. Dùng để dọn 1 clip "lạ" Suno
- * tự sinh thêm (cơ chế phía Suno chưa rõ) song song với seed/bản render trong pipeline Fade Out —
- * đã xác nhận qua test thực tế trên thư viện người dùng.
+/** `POST /suno/cleanup-keep-done { title, alwaysTrashIds?, maxAgeMs? }` — dọn TOÀN BỘ clip liên
+ * quan tới bài vừa xử lý trong pipeline Fade Out (title trùng khớp hoặc chứa đúng tên bài, mới
+ * tạo trong `maxAgeMs` gần nhất, mặc định 15 phút), CHỈ GIỮ LẠI bản có tiền tố đúng dạng
+ * "[Done] " + tên bài — tức clip Suno TỰ TẠO khi bấm Export → "Full Song" ngay trong Studio (đã
+ * xác nhận qua test thực tế: hành động này không chỉ lưu, mà còn tự render ra 1 clip riêng dùng
+ * tên project). Mọi bản khác (clip gốc upload, bản render qua API riêng, bản Fade Out, clip lạ
+ * trùng tên...) đều bị xoá vào thùng rác (reversible) — gồm cả các id trong `alwaysTrashIds`
+ * (vd seedClipId, exportClipId cũ) NHƯNG chỉ xoá nhóm này khi đã CHẮC CHẮN tìm thấy bản "[Done]"
+ * để thay thế, tránh trường hợp đọc quá sớm chưa thấy "[Done]" mà lỡ xoá mất bản duy nhất đang có.
+ * Trả về `doneClipId` (nếu tìm thấy) để pipeline dùng làm bản tải về cuối cùng.
  */
-export async function trashByExactTitle(request: Request, _env: Env): Promise<Response> {
-  const body = await readJson<Record<string, unknown> & { title?: unknown; excludeIds?: unknown; maxAgeMs?: unknown }>(request);
+export async function cleanupKeepDone(request: Request, _env: Env): Promise<Response> {
+  const body = await readJson<Record<string, unknown> & { title?: unknown; alwaysTrashIds?: unknown; maxAgeMs?: unknown }>(request);
   const session = readSession(body);
   const userId = sunoJwtSub(session.token);
   if (!userId) throw new HttpError(400, "missing_user_id", "Không xác định được user ID từ session.");
   const title = cleanText(body.title, 200);
   if (!title) throw new HttpError(400, "missing_title", "Thiếu title.");
-  const exclude = new Set(Array.isArray(body.excludeIds) ? body.excludeIds.filter((x): x is string => typeof x === "string") : []);
+  const doneTitle = `[Done] ${title}`;
+  const alwaysTrash = Array.isArray(body.alwaysTrashIds) ? body.alwaysTrashIds.filter((x): x is string => typeof x === "string") : [];
   const maxAgeMsRaw = Number(body.maxAgeMs);
-  const maxAgeMs = Number.isFinite(maxAgeMsRaw) && maxAgeMsRaw > 0 ? maxAgeMsRaw : 10 * 60 * 1000;
+  const maxAgeMs = Number.isFinite(maxAgeMsRaw) && maxAgeMsRaw > 0 ? maxAgeMsRaw : 15 * 60 * 1000;
   const cutoff = Date.now() - maxAgeMs;
-  const matches: Array<{ id: string; title: string }> = [];
+
+  const related: Array<{ id: string; title: string; createdAt: number }> = [];
   let cursor: string | null = null;
   for (let guard = 0; guard < 50; guard++) {
     const resBody = { cursor, limit: 100, filters: { trashed: "False", user: { presence: "True", userId } } };
     const res = await sunoStudioFetch("/api/feed/v3", session, "POST", resBody, 30000);
     const clips = Array.isArray(res && res.clips) ? res.clips : [];
     for (const c of clips) {
-      if (!c || c.title !== title || exclude.has(c.id)) continue;
+      if (!c || typeof c.title !== "string") continue;
+      if (c.title !== title && c.title !== doneTitle && c.title.indexOf(title) === -1) continue;
       const createdAt = typeof c.created_at === "string" ? Date.parse(c.created_at) : NaN;
       if (Number.isFinite(createdAt) && createdAt < cutoff) continue; // quá cũ — không đụng vào
-      matches.push({ id: c.id, title: c.title });
+      related.push({ id: c.id, title: c.title, createdAt: Number.isFinite(createdAt) ? createdAt : 0 });
     }
     cursor = res && res.next_cursor;
     if (!cursor) break;
     await sleep(250);
   }
-  const ids = matches.map((m) => m.id);
-  for (let i = 0; i < ids.length; i += 10) {
-    const batch = ids.slice(i, i + 10);
+
+  // Nếu lỡ có nhiều hơn 1 bản "[Done] " + title (hiếm, có thể do thử lại) — giữ bản MỚI NHẤT,
+  // các bản "[Done]" cũ hơn coi như rác luôn.
+  const doneMatches = related.filter((r) => r.title === doneTitle).sort((a, b) => b.createdAt - a.createdAt);
+  const keepId = doneMatches.length ? doneMatches[0].id : null;
+
+  const toTrashSet = new Set(related.filter((r) => r.id !== keepId).map((r) => r.id));
+  if (keepId) {
+    for (const id of alwaysTrash) if (id !== keepId) toTrashSet.add(id);
+  }
+  const toTrash = Array.from(toTrashSet);
+  for (let i = 0; i < toTrash.length; i += 10) {
+    const batch = toTrash.slice(i, i + 10);
     await sunoStudioFetch("/api/gen/trash", session, "POST", { trash: true, clip_ids: batch }, 30000);
     await new Promise((r) => setTimeout(r, 400));
   }
-  return json({ trashedCount: ids.length, ids });
+  return json({ doneClipId: keepId, trashedCount: toTrash.length, trashedIds: toTrash });
 }
 
 /** `POST /suno/cleanup { token, cookieHeader }` — chuyển các clip "_part" vào thùng rác (reversible). */

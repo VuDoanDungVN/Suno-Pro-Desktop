@@ -1417,13 +1417,18 @@ ipcMain.handle('suno-split-export', async (event, payload) => {
 // (kể cả phân tích warp) rồi tự lưu. Selector DOM dò được qua Inspect Element thực tế.
 async function sunoStudioAutomateChat(studioUrl, message, waitAfterSendMs) {
   return new Promise((resolve, reject) => {
-    // "show: false" khiến Chromium throttle/không mount kịp app React của Suno (timeout
-    // dò ô chat liên tục thất bại dù chờ đủ 60s) — thay vào đó đặt cửa sổ ở NGOÀI màn hình
-    // (vẫn coi là "hiển thị" nên render bình thường, không bị Chromium tạm hoãn) rồi
-    // showInactive() để không cướp focus/hiện lên trước mặt người dùng.
+    // "show: false" (cửa sổ thường) khiến Chromium throttle/không mount kịp app React của Suno
+    // (timeout dò ô chat liên tục thất bại dù chờ đủ 60s) — vì khi KHÔNG hiển thị, trình duyệt
+    // tạm dừng cả vòng lặp requestAnimationFrame lẫn phần dựng hình (compositor), bất kể
+    // document.hidden báo gì, nên Studio (dùng canvas Three.js + rAF để khởi tạo) không chạy.
+    // Đặt toạ độ âm (-10000, -10000) + showInactive() từng dùng để lách việc này (Chromium coi
+    // là "đang hiển thị" dù ở ngoài màn hình) — nhưng macOS có thể tự kéo cửa sổ đặt hoàn toàn
+    // ngoài vùng nhìn thấy trở lại màn hình, khiến người dùng vẫn thấy cửa sổ Studio hiện ra.
+    // Giải pháp đúng: "offscreen rendering" (OSR) của Electron — cửa sổ render liên tục vào 1
+    // buffer riêng, KHÔNG BAO GIỜ cần hiển thị thật (show() không hề được gọi), nên không có gì
+    // để hệ điều hành "kéo ra" cả, đồng thời rAF/compositor vẫn chạy đầy đủ như cửa sổ thật vì
+    // OSR vẫn render liên tục — không bị throttle như "show: false" thường.
     const win = new BrowserWindow({
-      x: -10000,
-      y: -10000,
       width: 1280,
       height: 900,
       show: false,
@@ -1433,10 +1438,15 @@ async function sunoStudioAutomateChat(studioUrl, message, waitAfterSendMs) {
         partition: SUNO_CONNECT_PARTITION,
         nodeIntegration: false,
         contextIsolation: true,
-        sandbox: true
+        sandbox: true,
+        offscreen: true
       }
     });
-    win.showInactive();
+    // Không cần xem hình ảnh render ra — chỉ cần "tiêu thụ" sự kiện paint để Electron không tích
+    // tụ buffer vô ích (khuyến nghị chính thức khi dùng offscreen rendering không hiển thị ảnh).
+    win.webContents.on('paint', () => {});
+    // KHÔNG gọi show()/showInactive() — cửa sổ OSR không cần (và không nên) được hiển thị thật,
+    // nếu không sẽ mất tác dụng tránh bị hệ điều hành kéo ra màn hình.
     let settled = false;
     const finish = (err, result) => {
       if (settled) return;
@@ -1753,16 +1763,16 @@ ipcMain.handle('suno-trash-clip', async (event, payload) => {
   return callSunoProWorker('/suno/trash-clip', { token, cookieHeader, deviceId, ids: payload.ids });
 });
 
-// Dọn clip "lạ" Suno tự sinh thêm (title trùng CHÍNH XÁC, mới tạo gần đây) — dùng trong pipeline
-// Fade Out để dọn bản phát sinh ngoài ý muốn bên cạnh seed/bản render, không chỉ dựa vào clip ID
-// đã biết trước (xem /suno/trash-by-title ở worker).
-ipcMain.handle('suno-trash-by-title', async (event, payload) => {
+// Dọn TOÀN BỘ clip liên quan tới bài vừa xử lý trong pipeline Fade Out, CHỈ GIỮ LẠI bản
+// "[Done] " + tên bài (clip Suno tự tạo khi bấm Export → Full Song trong Studio) — xem
+// /suno/cleanup-keep-done ở worker. Trả về doneClipId để pipeline dùng làm bản tải về cuối cùng.
+ipcMain.handle('suno-cleanup-keep-done', async (event, payload) => {
   if (!payload || !payload.session || !payload.title) throw new Error('Thiếu session hoặc title.');
   const { token, cookieHeader, deviceId } = await sunoResolveToken(payload.session);
-  return callSunoProWorker('/suno/trash-by-title', {
+  return callSunoProWorker('/suno/cleanup-keep-done', {
     token, cookieHeader, deviceId,
     title: payload.title,
-    excludeIds: Array.isArray(payload.excludeIds) ? payload.excludeIds : [],
+    alwaysTrashIds: Array.isArray(payload.alwaysTrashIds) ? payload.alwaysTrashIds : [],
     maxAgeMs: payload.maxAgeMs
   });
 });

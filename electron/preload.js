@@ -69,7 +69,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sunoSessionClear: () => ipcRenderer.invoke('suno-session-clear'),
   sunoUpload: (payload) => ipcRenderer.invoke('suno-upload', payload),
   sunoClipDuration: (payload) => ipcRenderer.invoke('suno-clip-duration', payload),
-  sunoTrashByTitle: (payload) => ipcRenderer.invoke('suno-trash-by-title', payload),
+  sunoCleanupKeepDone: (payload) => ipcRenderer.invoke('suno-cleanup-keep-done', payload),
   sunoNotify: (payload) => ipcRenderer.invoke('suno-notify', payload),
   onSunoUploadProgress: (callback) => {
     const listener = (_event, msg) => callback(msg);

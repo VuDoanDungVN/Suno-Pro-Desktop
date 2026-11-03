@@ -46,7 +46,7 @@ import { muaKeyPageHtml, muaKeySuccessPageHtml } from "./mua-key";
 import { adminListPayments, createCheckout, getOrderStatus, stripeWebhook } from "./stripe";
 import {
   cleanup,
-  trashByExactTitle,
+  cleanupKeepDone,
   downloadPrepare,
   editFadeStart,
   editFadeStatus,
@@ -232,9 +232,9 @@ async function routeSuno(pathname: string, method: string, request: Request, env
     requireApp(ctx);
     return cleanup(request, env);
   }
-  if (pathname === "/suno/trash-by-title" && method === "POST") {
+  if (pathname === "/suno/cleanup-keep-done" && method === "POST") {
     requireApp(ctx);
-    return trashByExactTitle(request, env);
+    return cleanupKeepDone(request, env);
   }
   if (pathname === "/suno/permanent-delete" && method === "POST") {
     requireApp(ctx);

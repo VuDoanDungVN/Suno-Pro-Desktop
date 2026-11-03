@@ -5448,32 +5448,30 @@
           })
           .then(function () {
             logLine('——— HOÀN TẤT — clipId cuối cùng: ' + finalClipId + ' ———');
-            setStatus('✅ Hoàn tất! Chọn Download để tải về, hoặc Tiếp tục để chạy bài khác.', 'ok');
-            // Dọn clip gốc (bản upload nguyên bài, chưa qua reverse/fade) khỏi thư viện Suno —
-            // chỉ còn lại bản cuối cùng đã hoàn chỉnh. Xoá vào thùng rác (có thể khôi phục
-            // trên Suno), không phải xoá vĩnh viễn. Best-effort — lỗi ở đây không được phép làm
-            // hỏng kết quả "Hoàn tất" đã báo ở trên. Chỉ xoá khi bản cuối KHÁC seedClipId — nếu
-            // đã bỏ qua Studio/Render (Reverse cục bộ + Bỏ qua Fade Out) thì finalClipId chính
-            // là seedClipId, không có gì để dọn cả (xoá sẽ mất luôn kết quả).
-            if (seedClipId && finalClipId && finalClipId !== seedClipId) {
-              api.sunoTrashClip({ session: session, ids: [seedClipId] }).then(function () {
-                logLine('Đã dọn clip gốc (upload nguyên bài) khỏi thư viện Suno: ' + seedClipId);
-              }).catch(function (e) {
-                logLine('⚠ Dọn clip gốc lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));
-              });
-            }
-            // Dọn thêm clip "lạ" Suno tự sinh (title trùng CHÍNH XÁC với tên bài, không phải
-            // "[Split] ..." cũng không phải "reversed-audio.wav") — đã xác nhận qua thực tế vẫn
-            // xuất hiện thêm bên cạnh seed/bản render trong cùng 1 lần chạy, chưa rõ cơ chế phía
-            // Suno sinh ra khi nào. Loại trừ seedClipId/finalClipId, chỉ xét clip mới tạo trong
-            // 10 phút gần nhất (mặc định) để không đụng nhầm bài khác cùng tên user có từ trước.
-            api.sunoTrashByTitle({ session: session, title: title, excludeIds: [seedClipId, finalClipId] }).then(function (res) {
-              if (res && res.trashedCount > 0) {
-                logLine('Đã dọn ' + res.trashedCount + ' clip "lạ" trùng tên "' + title + '" phát sinh thêm (ID: ' + res.ids.join(', ') + ').');
+            setStatus('⏳ Đang dọn dẹp thư viện Suno…', '');
+            // Dọn TOÀN BỘ clip liên quan tới bài này (clip gốc upload, bản render/fade qua API,
+            // clip lạ trùng tên...) — CHỈ GIỮ LẠI bản "[Done] " + tên bài (clip Suno tự tạo khi
+            // bấm Export → Full Song ngay trong Studio). Best-effort: nếu lỗi hoặc chưa tìm thấy
+            // bản "[Done]", KHÔNG xoá gì cả và vẫn dùng bản render/fade hiện tại — không được
+            // phép làm hỏng hay mất kết quả đã có.
+            return api.sunoCleanupKeepDone({
+              session: session,
+              title: title,
+              alwaysTrashIds: [seedClipId, exportClipId, finalClipId].filter(Boolean)
+            }).then(function (res) {
+              if (res && res.doneClipId) {
+                finalClipId = res.doneClipId;
+                finalTitle = '[Done] ' + title;
+                logLine('Đã tìm thấy bản "[Done] ' + title + '" — dùng làm bản cuối cùng, đã dọn ' + (res.trashedCount || 0) + ' clip khác.');
+              } else {
+                logLine('⚠ Không tìm thấy bản "[Done] ' + title + '" — giữ nguyên bản render/fade hiện tại, không xoá gì.');
               }
             }).catch(function (e) {
-              logLine('⚠ Dọn clip trùng tên lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));
+              logLine('⚠ Dọn dẹp thư viện lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));
             });
+          })
+          .then(function () {
+            setStatus('✅ Hoàn tất! Chọn Download để tải về, hoặc Tiếp tục để chạy bài khác.', 'ok');
             // Không tự tải về nữa (trước đây hay bị "Hết giờ tải audio (120s)"
             // nếu người dùng không kịp bấm lưu) — hiện popup để người dùng tự
             // chọn Download (mở popup Suno Download có sẵn, tự điền sẵn link)
