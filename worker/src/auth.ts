@@ -89,9 +89,26 @@ function licenseView(row: LicenseRow) {
 // ---------------------------------------------------------------------------
 
 export async function authorize(request: Request, env: Env): Promise<Ctx> {
+  const ip = request.headers.get("cf-connecting-ip") ?? "local";
+  await assertIpNotBanned(env, ip);
   const token = bearer(request);
   if (!token) throw new HttpError(401, "unauthorized", "Chưa đăng nhập. Hãy nhập key.");
   if (env.API_TOKEN && sameText(token, env.API_TOKEN)) return { licenseId: "owner", role: "owner" };
+  try {
+    return await authorizeToken(token, request, env);
+  } catch (err) {
+    // Chỉ tính là "vi phạm" (có thể bị chặn IP) khi CÓ gửi token nhưng token đó không khớp
+    // Key nào (unauthorized) hoặc Key đã bị thu hồi (license_revoked) — không tính các trường hợp
+    // khác (vd device_mismatch: có thể chỉ là khách cài lại máy, hoặc license_expired: khách cũ
+    // hết hạn bình thường, không phải dấu hiệu dò/dùng chùa Key).
+    if (err instanceof HttpError && (err.code === "unauthorized" || err.code === "license_revoked")) {
+      await recordIpViolation(env, ip, err.code);
+    }
+    throw err;
+  }
+}
+
+async function authorizeToken(token: string, request: Request, env: Env): Promise<Ctx> {
   const hash = await sha256Hex(token);
   const row = await env.DB.prepare(
     `SELECT s.license_id, s.role, s.last_seen_at, s.device_id, l.status, l.expires_at
@@ -131,6 +148,111 @@ export function requireApp(ctx: Ctx): void {
   if (ctx.role !== "desktop" && ctx.role !== "owner") {
     throw new HttpError(403, "wrong_device", "Phiên đăng nhập không hợp lệ cho thao tác này.");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Tự động chặn IP khi dùng Key đã bị thu hồi / không khớp Key nào — xem authorize().
+// Lần vi phạm 1: chặn 24h. Vi phạm lần 2 (sau khi hết 24h mà vẫn vi phạm tiếp): chặn vĩnh viễn.
+// Chỉ Admin (trang /admin) mới gỡ được chặn hoặc tự tay chặn vĩnh viễn 1 IP bất kỳ.
+// ---------------------------------------------------------------------------
+
+const IP_BAN_TEMP_MS = 24 * 60 * 60_000;
+
+interface IpBanRow {
+  ip: string;
+  violation_count: number;
+  banned_until: number | null;
+  permanent: number;
+  reason: string | null;
+  last_violation_at: number | null;
+  created_at: number;
+}
+
+async function assertIpNotBanned(env: Env, ip: string): Promise<void> {
+  if (ip === "local") return;
+  const row = await env.DB.prepare("SELECT permanent, banned_until FROM ip_bans WHERE ip = ?")
+    .bind(ip)
+    .first<{ permanent: number; banned_until: number | null }>();
+  if (!row) return;
+  if (row.permanent) {
+    throw new HttpError(403, "ip_banned_permanent", "IP này đã bị chặn vĩnh viễn do vi phạm nhiều lần. Liên hệ quản trị viên nếu đây là nhầm lẫn.");
+  }
+  if (row.banned_until && row.banned_until > now()) {
+    const minutesLeft = Math.max(1, Math.ceil((row.banned_until - now()) / 60_000));
+    throw new HttpError(403, "ip_banned", `IP này đang bị tạm chặn ${minutesLeft} phút do dùng Key không hợp lệ/đã bị thu hồi.`);
+  }
+}
+
+async function recordIpViolation(env: Env, ip: string, reasonCode: string): Promise<void> {
+  if (ip === "local") return;
+  const t = now();
+  const reasonText = reasonCode === "license_revoked" ? "Dùng Key đã bị thu hồi" : "Không tìm thấy Key khớp (token không hợp lệ)";
+  const row = await env.DB.prepare("SELECT violation_count, banned_until, permanent FROM ip_bans WHERE ip = ?")
+    .bind(ip)
+    .first<{ violation_count: number; banned_until: number | null; permanent: number }>();
+  if (!row) {
+    await env.DB.prepare(
+      "INSERT INTO ip_bans (ip, violation_count, banned_until, permanent, reason, last_violation_at, created_at, updated_at) VALUES (?, 1, ?, 0, ?, ?, ?, ?)",
+    )
+      .bind(ip, t + IP_BAN_TEMP_MS, reasonText, t, t, t)
+      .run();
+    return;
+  }
+  if (row.permanent) {
+    await env.DB.prepare("UPDATE ip_bans SET violation_count = violation_count + 1, reason = ?, last_violation_at = ?, updated_at = ? WHERE ip = ?")
+      .bind(reasonText, t, t, ip)
+      .run();
+    return;
+  }
+  const previousBanExpired = row.banned_until !== null && row.banned_until <= t;
+  if (previousBanExpired) {
+    // Vi phạm lần 2 (sau khi đã từng bị chặn tạm 24h và đã hết hạn) — chặn vĩnh viễn.
+    await env.DB.prepare(
+      "UPDATE ip_bans SET violation_count = violation_count + 1, banned_until = NULL, permanent = 1, reason = ?, last_violation_at = ?, updated_at = ? WHERE ip = ?",
+    )
+      .bind(reasonText, t, t, ip)
+      .run();
+  } else {
+    // Bình thường không tới nhánh này (assertIpNotBanned đã chặn từ trước) — vẫn cập nhật để
+    // không mất dấu vi phạm nếu có race condition giữa 2 request gần như đồng thời.
+    await env.DB.prepare("UPDATE ip_bans SET violation_count = violation_count + 1, reason = ?, last_violation_at = ?, updated_at = ? WHERE ip = ?")
+      .bind(reasonText, t, t, ip)
+      .run();
+  }
+}
+
+export async function adminListIpBans(env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(
+    "SELECT ip, violation_count, banned_until, permanent, reason, last_violation_at, created_at FROM ip_bans ORDER BY last_violation_at DESC LIMIT 500",
+  ).all<IpBanRow>();
+  return json({
+    bans: (rows.results ?? []).map((r) => ({
+      ip: r.ip,
+      violationCount: r.violation_count,
+      bannedUntil: r.banned_until,
+      permanent: !!r.permanent,
+      reason: r.reason,
+      lastViolationAt: r.last_violation_at,
+      createdAt: r.created_at,
+    })),
+  });
+}
+
+export async function adminUnbanIp(env: Env, ip: string): Promise<Response> {
+  await env.DB.prepare("DELETE FROM ip_bans WHERE ip = ?").bind(ip).run();
+  return json({ ok: true });
+}
+
+export async function adminBanIpPermanent(env: Env, ip: string, reason: string | null): Promise<Response> {
+  const t = now();
+  await env.DB.prepare(
+    `INSERT INTO ip_bans (ip, violation_count, banned_until, permanent, reason, last_violation_at, created_at, updated_at)
+     VALUES (?, 1, NULL, 1, ?, ?, ?, ?)
+     ON CONFLICT(ip) DO UPDATE SET permanent = 1, banned_until = NULL, reason = excluded.reason, last_violation_at = excluded.last_violation_at, updated_at = excluded.updated_at`,
+  )
+    .bind(ip, reason || "Admin chặn thủ công", t, t, t)
+    .run();
+  return json({ ok: true });
 }
 
 async function newSession(env: Env, licenseId: string, deviceName: string | null, deviceId: string | null): Promise<string> {

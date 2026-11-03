@@ -234,6 +234,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost" id="view-leads" type="button"></button>
         <button class="btn ghost" id="view-payments" type="button"></button>
+        <button class="btn ghost" id="view-ip-bans" type="button"></button>
         <button class="btn ghost" id="broadcast-key" type="button"></button>
         <button class="btn ghost" id="renew-trial" type="button"></button>
         <button class="btn ghost" id="cleanup-trial" type="button"></button>
@@ -241,6 +242,8 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
         <button class="btn primary" id="new-key" type="button"></button>
       </div>
     </div>
+
+    <div class="notice" id="ip-ban-alert" hidden style="margin-bottom:14px"></div>
 
     <section class="kpis" id="kpis" aria-label="Tổng quan"></section>
 
@@ -366,6 +369,24 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     </div>
     <p class="sub" id="payments-empty" hidden style="padding:16px 0 0;text-align:center">Chưa có đơn nào.</p>
     <div class="d-actions"><button class="btn primary" id="payments-done" type="button">Đóng</button></div>
+  </div>
+</dialog>
+
+<dialog id="ip-bans" style="width:min(780px, calc(100vw - 32px))">
+  <div class="d-head"><h2>IP bị chặn</h2><p>Tự động chặn khi phát hiện dùng Key đã bị thu hồi hoặc không khớp Key nào — vi phạm lần 1 chặn 24 giờ, vi phạm lần 2 (sau khi đã hết 24h) chặn vĩnh viễn. Chỉ Admin mới gỡ chặn hoặc chặn vĩnh viễn được.</p></div>
+  <div class="d-body">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input class="input" id="ip-ban-add-input" style="max-width:240px" placeholder="Nhập IP để chặn vĩnh viễn thủ công">
+      <button class="btn danger" id="ip-ban-add" type="button"></button>
+    </div>
+    <div style="max-height:380px;overflow:auto;border:1px solid var(--line);border-radius:10px">
+      <table>
+        <thead><tr><th>IP</th><th>Trạng thái</th><th>Số lần vi phạm</th><th>Lý do gần nhất</th><th>Vi phạm gần nhất</th><th></th></tr></thead>
+        <tbody id="ip-bans-rows"></tbody>
+      </table>
+    </div>
+    <p class="sub" id="ip-bans-empty" hidden style="padding:16px 0 0;text-align:center">Chưa có IP nào bị chặn.</p>
+    <div class="d-actions"><button class="btn primary" id="ip-bans-done" type="button">Đóng</button></div>
   </div>
 </dialog>
 
@@ -521,6 +542,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
       loadTrialCode();
       loadDownloadUrl();
       loadAppVersion();
+      loadIpBans().catch(() => {});
     } else {
       loginView.hidden = false;
       appView.hidden = true;
@@ -724,6 +746,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   $("#renew-trial").innerHTML = icon("clock") + "Gia hạn trial hết hạn +1 ngày";
   $("#view-leads").innerHTML = icon("users") + "Email đăng ký";
   $("#view-payments").innerHTML = icon("refresh") + "Dòng tiền";
+  $("#view-ip-bans").innerHTML = icon("ban") + "IP bị chặn";
   $("#broadcast-key").innerHTML = icon("refresh") + "Gửi mail hàng loạt";
   $("#trial-code-save").innerHTML = icon("check") + "Lưu mã";
   $("#download-url-win-save").innerHTML = icon("check") + "Lưu link";
@@ -956,6 +979,71 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     } catch (error) { toast(error.message, "bad"); }
   });
   $("#payments-done").addEventListener("click", () => $("#payments").close());
+
+  let ipBansCache = [];
+  function renderIpBans() {
+    $("#ip-bans-rows").innerHTML = ipBansCache.map((b) => {
+      const status = b.permanent
+        ? '<span class="pill bad">Vĩnh viễn</span>'
+        : (b.bannedUntil && b.bannedUntil > Date.now())
+          ? '<span class="pill warn">Tạm 24h (còn ' + Math.max(1, Math.ceil((b.bannedUntil - Date.now()) / HOUR)) + 'h)</span>'
+          : '<span class="pill muted">Đã hết hạn</span>';
+      const actions = '<div class="row-actions">' +
+        '<button class="btn sm" data-unban="' + esc(b.ip) + '" type="button">Gỡ chặn</button>' +
+        (b.permanent ? '' : '<button class="btn sm danger" data-permaban="' + esc(b.ip) + '" type="button">Chặn vĩnh viễn</button>') +
+        '</div>';
+      return '<tr><td class="mono">' + esc(b.ip) + '</td><td>' + status + '</td><td>' + b.violationCount + '</td>' +
+        '<td>' + esc(b.reason || "—") + '</td><td>' + dateTime(b.lastViolationAt) + '</td><td>' + actions + '</td></tr>';
+    }).join("");
+    $("#ip-bans-empty").hidden = ipBansCache.length > 0;
+  }
+  function updateIpBanAlert() {
+    const active = ipBansCache.filter((b) => b.permanent || (b.bannedUntil && b.bannedUntil > Date.now()));
+    const el = $("#ip-ban-alert");
+    if (active.length > 0) {
+      el.hidden = false;
+      el.innerHTML = icon("alert") + '<span>Đang có <b>' + active.length + '</b> IP bị chặn do dùng Key không hợp lệ/đã bị thu hồi — bấm "IP bị chặn" để xem chi tiết hoặc gỡ chặn.</span>';
+    } else {
+      el.hidden = true;
+    }
+  }
+  async function loadIpBans() {
+    ipBansCache = (await apiFetch("/admin/ip-bans")).bans;
+    renderIpBans();
+    updateIpBanAlert();
+  }
+  $("#view-ip-bans").addEventListener("click", async () => {
+    $("#ip-bans").showModal();
+    try { await loadIpBans(); } catch (error) { toast(error.message, "bad"); }
+  });
+  $("#ip-bans-rows").addEventListener("click", async (e) => {
+    const unbanIp = e.target.closest("[data-unban]")?.dataset.unban;
+    const permaIp = e.target.closest("[data-permaban]")?.dataset.permaban;
+    try {
+      if (unbanIp) {
+        await apiFetch("/admin/ip-bans/" + encodeURIComponent(unbanIp), { method: "DELETE" });
+        toast("Đã gỡ chặn " + unbanIp);
+        await loadIpBans();
+      } else if (permaIp) {
+        if (!confirm("Chặn vĩnh viễn IP " + permaIp + "?")) return;
+        await apiFetch("/admin/ip-bans/" + encodeURIComponent(permaIp) + "/ban-permanent", { method: "POST", body: JSON.stringify({ reason: "Admin chặn thủ công" }) });
+        toast("Đã chặn vĩnh viễn " + permaIp);
+        await loadIpBans();
+      }
+    } catch (error) { toast(error.message, "bad"); }
+  });
+  $("#ip-ban-add").addEventListener("click", async () => {
+    const ip = $("#ip-ban-add-input").value.trim();
+    if (!ip) return;
+    try {
+      await apiFetch("/admin/ip-bans/" + encodeURIComponent(ip) + "/ban-permanent", { method: "POST", body: JSON.stringify({ reason: "Admin chặn thủ công" }) });
+      $("#ip-ban-add-input").value = "";
+      toast("Đã chặn vĩnh viễn " + ip);
+      await loadIpBans();
+    } catch (error) { toast(error.message, "bad"); }
+  });
+  $("#ip-bans-done").addEventListener("click", () => $("#ip-bans").close());
+  $("#ip-ban-add").innerHTML = icon("ban") + "Chặn vĩnh viễn";
 
   $("#broadcast-key").addEventListener("click", async () => {
     $("#broadcast-form").reset();

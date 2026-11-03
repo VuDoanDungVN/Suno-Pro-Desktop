@@ -13,6 +13,10 @@
   <title>Suno Pro</title>
   <script type="module" crossorigin src="./assets/main-9QM-JpB-.js"></script>
   <script defer src="./assets/suno-fix-rejected.js"></script>
+  <!-- Mã hoá MP3 thuần JS (không phụ thuộc mạng) — dùng để mã hoá lại audio đã đảo chiều cục bộ
+       thành MP3 thay vì WAV trước khi upload lên Suno (WAV khiến Studio render bị mất ~1 phút
+       đầu, đã xác nhận qua test thực tế — MP3 thì không). -->
+  <script src="./assets/lamejs.iife.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/main-CtjhM9ST.css">
   <link rel="stylesheet" href="./assets/custom-polish.css">
   <!-- TEMP: ẩn popup activation để test, nhớ xóa trước khi build release -->
@@ -453,7 +457,21 @@
         <div class="suno-split-step-row suno-prep-actions-row">
           <button id="sunoSplitLoad" class="suno-connect-btn suno-import-btn" title="Chọn file MP3 cần chia nhỏ"><span aria-hidden="true">＋</span> Chọn bài hát</button>
           <button id="openYoutubeBtn" class="suno-test-btn" type="button" title="Tải audio từ YouTube"><span aria-hidden="true">▶</span> YouTube</button>
+          <button id="fadeOutPipelineBtn" class="suno-test-btn" type="button" title="Upload nguyên bài lên Studio (không cắt part), áp dụng lệnh AI cố định, render và tự động Fade Out 5 giây cuối">⤵ Fade Out</button>
         </div>
+        <div class="suno-split-step-row" style="margin-top:4px;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;" title="Nếu bật: đảo ngược (reverse) audio ngay trên máy TRƯỚC khi upload lên Suno, chính xác tuyệt đối theo từng mẫu âm thanh.">
+            <input type="checkbox" id="fadeOutReverseBeforeUpload">
+            Reverse audio trước khi upload (xử lý cục bộ)
+          </label>
+        </div>
+        <div class="suno-split-step-row" style="margin-top:4px;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;" title="Nếu bật: dừng lại ngay sau khi render xong (đã gồm reverse), không áp dụng Fade Out, tải thẳng bản đó về.">
+            <input type="checkbox" id="fadeOutSkipFade">
+            Bỏ qua Fade Out (chỉ lấy bản đã render)
+          </label>
+        </div>
+        <div id="fadeOutPipelineStatus" class="suno-status" style="display:none; margin-top:6px;"></div>
         <div class="suno-prep-file-row hidden" id="sunoPrepFileRow">
           <div class="suno-prep-thumb" id="sunoPrepThumbWrap">
             <img id="sunoPrepThumbImg" class="suno-prep-thumb-img hidden" alt="">
@@ -1185,6 +1203,27 @@
             </div>
             <div class="suno-url-hint">Cần session Suno (lấy ở ⚙️ Suno Upload). Tên file tự điền theo tên bài — bạn chỉ cần chọn thư mục lưu. Bài private/đã xóa hoặc ngoài quyền download của gói sẽ báo lỗi.</div>
             <div id="sunoDlStatus" class="suno-status" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Popup hoàn tất riêng cho pipeline Fade Out — không tự tải về nữa,
+         để người dùng tự chọn Download (mở popup Suno Download có sẵn, tự
+         điền link + bấm Download hộ) hoặc Tiếp tục (chỉ đóng popup). Tách
+         biệt hoàn toàn khỏi popup "uploadConfirmModal" của pipeline Split
+         để không đụng tới logic/state của pipeline đó. ── -->
+    <div id="fadeOutDoneModal" class="cm-modal-overlay hidden">
+      <div class="cm-modal" style="width:340px;" role="dialog" aria-modal="true" aria-labelledby="fadeOutDoneTitle">
+        <div class="cm-modal-header">
+          <span id="fadeOutDoneTitle">✅ Hoàn tất</span>
+          <button id="closeFadeOutDoneBtn" class="cm-modal-close" type="button" aria-label="Đóng">✕</button>
+        </div>
+        <div class="cm-modal-body">
+          <div id="fadeOutDoneMsg" class="suno-status ok" style="margin-bottom:10px;"></div>
+          <div class="suno-split-step-row" style="gap:8px;">
+            <button id="fadeOutDoneDownloadBtn" class="suno-connect-btn" type="button" style="flex:1;">⬇ Download</button>
+            <button id="fadeOutDoneContinueBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;">Tiếp tục</button>
           </div>
         </div>
       </div>
@@ -5071,6 +5110,389 @@
       showGate();
       refreshAlbums();
     });
+  </script>
+
+  <!-- ── "Fade Out" — pipeline ĐỘC LẬP, không đụng tới luồng cắt part/upload-part
+       hiện có: upload nguyên bài 1 lần → tạo project Studio → gửi lệnh cố định
+       vào chat AI → đợi 10s → render → Fade Out 5 giây cuối → tải + lưu file. ── -->
+  <script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var api = window.electronAPI;
+    var btn = document.getElementById('fadeOutPipelineBtn');
+    var statusEl = document.getElementById('fadeOutPipelineStatus');
+    var skipFadeEl = document.getElementById('fadeOutSkipFade');
+    var reverseBeforeUploadEl = document.getElementById('fadeOutReverseBeforeUpload');
+    var fadeOutDoneModal = document.getElementById('fadeOutDoneModal');
+    var fadeOutDoneMsg = document.getElementById('fadeOutDoneMsg');
+    var fadeOutDoneDownloadBtn = document.getElementById('fadeOutDoneDownloadBtn');
+    var fadeOutDoneContinueBtn = document.getElementById('fadeOutDoneContinueBtn');
+    var closeFadeOutDoneBtn = document.getElementById('closeFadeOutDoneBtn');
+    if (!api || !btn || !statusEl) return;
+
+    var FIXED_PROMPT = 'Reverse lại audio này cho tôi. Lưu ý : Không được split cắt đoạn audio, chỉ reverse toàn bộ audio. Đảm bảo audio được reverse đúng và đầy đủ.';
+    var WAIT_AFTER_CHAT_MS = 60000;
+    var FADE_SECONDS = 5;
+    var running = false;
+    var fadeOutPendingClipId = null;
+    var fadeOutPendingTitle = null;
+
+    function hideFadeOutDoneModal() {
+      if (fadeOutDoneModal) fadeOutDoneModal.classList.add('hidden');
+    }
+    if (fadeOutDoneDownloadBtn) {
+      fadeOutDoneDownloadBtn.addEventListener('click', function () {
+        if (!fadeOutPendingClipId) { hideFadeOutDoneModal(); return; }
+        var dlModal = document.getElementById('sunoDownloadModal');
+        var dlLinkInput = document.getElementById('sunoDlLink');
+        var dlBtn = document.getElementById('sunoDlBtn');
+        hideFadeOutDoneModal();
+        if (!dlModal || !dlLinkInput || !dlBtn) return;
+        dlLinkInput.value = 'https://suno.com/song/' + fadeOutPendingClipId;
+        dlModal.classList.remove('hidden');
+        dlBtn.click();
+      });
+    }
+    if (fadeOutDoneContinueBtn) {
+      fadeOutDoneContinueBtn.addEventListener('click', function () {
+        hideFadeOutDoneModal();
+        setStatus('', '');
+      });
+    }
+    if (closeFadeOutDoneBtn) {
+      closeFadeOutDoneBtn.addEventListener('click', hideFadeOutDoneModal);
+    }
+
+    function setStatus(text, cls) {
+      if (!text) { statusEl.style.display = 'none'; statusEl.textContent = ''; return; }
+      statusEl.style.display = 'block';
+      statusEl.textContent = text;
+      statusEl.className = 'suno-status' + (cls ? ' ' + cls : '');
+    }
+
+    // Ghi vào debug.log (xem menu ☰ → Nhật ký tiến trình) — tag "[fadeout]" để
+    // lọc/tìm riêng, giữ nguyên ký hiệu ✗/✅/⚠/▶ để màn Nhật ký tự tô màu đúng
+    // (xem parseLogLine ở phần "Nhật ký tiến trình" phía trên file này).
+    function logLine(text) {
+      if (api && typeof api.debugLog === 'function') api.debugLog('[fadeout] ' + text);
+    }
+
+    // Electron bọc lỗi ném ra từ ipcMain.handle thành chuỗi dạng
+    // "Error invoking remote method 'suno-xxx': Error: <nội dung thật>" — bóc
+    // lớp bọc này ra để cả status lẫn log chỉ còn đúng nội dung lỗi thật sự.
+    function cleanErrorMessage(e) {
+      var msg = (e && e.message) || String(e);
+      msg = msg.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/i, '');
+      return msg;
+    }
+
+    // Chạy 1 bước có tên (ghi log bắt-đầu/xong/lỗi rõ ràng từng bước), thay vì
+    // chỉ có 1 dòng trạng thái chung chung như trước — người dùng mở Nhật ký
+    // tiến trình sẽ thấy chính xác đã chạy tới đâu và lỗi gì nếu có.
+    function step(name, statusText, fn) {
+      logLine('▶ Bắt đầu: ' + name);
+      setStatus('⏳ ' + statusText, '');
+      return Promise.resolve().then(fn).then(function (result) {
+        logLine('✅ Xong: ' + name);
+        return result;
+      }, function (e) {
+        var msg = cleanErrorMessage(e);
+        logLine('✗ LỖI ở bước "' + name + '": ' + msg);
+        throw new Error(name + ': ' + msg);
+      });
+    }
+
+    function fileBaseName(filePath) {
+      var parts = String(filePath || '').split(/[\\/]/);
+      var name = parts[parts.length - 1] || 'audio';
+      return name.replace(/\.[^.]+$/, '');
+    }
+
+    function toFileUrl(filePath) {
+      var normalized = String(filePath || '').replace(/\\/g, '/');
+      if (normalized[0] !== '/') normalized = '/' + normalized;
+      return 'file://' + encodeURI(normalized);
+    }
+
+    function readDuration(filePath) {
+      return new Promise(function (resolve, reject) {
+        var el = document.createElement('audio');
+        el.preload = 'metadata';
+        el.onloadedmetadata = function () {
+          var d = el.duration;
+          if (!isFinite(d) || d <= 0) { reject(new Error('Không đọc được thời lượng file.')); return; }
+          resolve(d);
+        };
+        el.onerror = function () { reject(new Error('Không đọc được file audio để lấy thời lượng — định dạng có thể không được hỗ trợ.')); };
+        el.src = toFileUrl(filePath);
+      });
+    }
+
+    // Đảo ngược (reverse) audio NGAY TRÊN MÁY, chính xác tuyệt đối theo từng mẫu âm thanh,
+    // trước khi upload lên Suno — tách biệt hoàn toàn khỏi mọi bước phía sau (không đụng
+    // tới logic Studio/AI/render/Fade Out hiện có). Chỉ đổi "bytes" + "filename" dùng ở
+    // bước Upload khi người dùng bật tuỳ chọn này.
+    // Mã hoá lại thành MP3 (không phải WAV) — đã xác nhận qua test thực tế: upload WAV khiến
+    // Suno Studio render bị mất ~1 phút đầu (bug phía Suno khi xử lý nguồn WAV), còn MP3 thì
+    // không — nên dùng lamejs (thư viện JS thuần, không cần mạng, nạp qua assets/lamejs.iife.js)
+    // mã hoá PCM đã đảo ngược thành MP3 thay vì tự ghi header WAV như trước.
+    function encodeReversedMp3(audioBuffer) {
+      var numChannels = Math.min(2, audioBuffer.numberOfChannels); // lamejs chỉ hỗ trợ mono/stereo
+      var sampleRate = audioBuffer.sampleRate;
+      var numFrames = audioBuffer.length;
+      var channelData = [];
+      for (var ch = 0; ch < numChannels; ch++) channelData.push(audioBuffer.getChannelData(ch));
+
+      // Đảo ngược thứ tự mẫu + chuyển sang Int16 PCM (y hệt logic reverse cũ, chỉ khác định
+      // dạng đích: Int16Array cho lame thay vì ghi thẳng vào buffer WAV).
+      var reversed = [];
+      for (var c = 0; c < numChannels; c++) {
+        var out = new Int16Array(numFrames);
+        var src = channelData[c];
+        for (var frame = 0; frame < numFrames; frame++) {
+          var sample = Math.max(-1, Math.min(1, src[numFrames - 1 - frame]));
+          out[frame] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+        }
+        reversed.push(out);
+      }
+
+      var kbps = 192;
+      var encoder = new lamejs.Mp3Encoder(numChannels, sampleRate, kbps);
+      var blockSize = 1152;
+      var mp3Chunks = [];
+      for (var i = 0; i < numFrames; i += blockSize) {
+        var left = reversed[0].subarray(i, i + blockSize);
+        var right = numChannels > 1 ? reversed[1].subarray(i, i + blockSize) : undefined;
+        var chunk = encoder.encodeBuffer(left, right);
+        if (chunk && chunk.length > 0) mp3Chunks.push(chunk);
+      }
+      var endChunk = encoder.flush();
+      if (endChunk && endChunk.length > 0) mp3Chunks.push(endChunk);
+
+      var totalLen = mp3Chunks.reduce(function (sum, c) { return sum + c.length; }, 0);
+      var result = new Uint8Array(totalLen);
+      var pos = 0;
+      for (var k = 0; k < mp3Chunks.length; k++) {
+        result.set(mp3Chunks[k], pos);
+        pos += mp3Chunks[k].length;
+      }
+      return result;
+    }
+
+    function reverseAudioLocally(bytes) {
+      if (typeof lamejs === 'undefined' || !lamejs.Mp3Encoder) {
+        return Promise.reject(new Error('Không nạp được thư viện mã hoá MP3 (lamejs) — thử khởi động lại app.'));
+      }
+      var uint8 = new Uint8Array(bytes);
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      var ctx = new AudioCtx();
+      return ctx.decodeAudioData(uint8.buffer).then(function (audioBuffer) {
+        var mp3Bytes = encodeReversedMp3(audioBuffer);
+        ctx.close();
+        return { bytes: Array.from(mp3Bytes), filename: 'reversed-audio.mp3' };
+      }, function (err) {
+        ctx.close();
+        throw new Error('Không đảo chiều được audio cục bộ: ' + (err && err.message ? err.message : String(err)));
+      });
+    }
+
+    function getSession() {
+      return api.sunoSessionLoad().then(function (res) {
+        var session = res && res.session;
+        if (!session) throw new Error('Chưa đăng nhập Suno — đăng nhập trước đã.');
+        return session;
+      });
+    }
+
+    btn.addEventListener('click', function () {
+      if (running) return;
+      api.selectFile().then(function (filePath) {
+        if (!filePath) return;
+        running = true;
+        btn.disabled = true;
+        var session, title, duration, projectId, seedClipId, exportClipId, exportDuration, finalClipId, finalTitle;
+        title = fileBaseName(filePath);
+        logLine('——— Bắt đầu pipeline Fade Out cho file: ' + filePath + ' ———');
+
+        return step('Đọc file + session', 'Đang đọc file…', function () {
+          return Promise.all([getSession(), readDuration(filePath), api.readAudioFile(filePath)]);
+        })
+          .then(function (res) {
+            session = res[0];
+            duration = res[1];
+            var bytes = res[2];
+            var uploadFilename = filePath.split(/[\\/]/).pop();
+            logLine('Thời lượng file gốc: ' + duration.toFixed(2) + 's');
+            var prep = Promise.resolve();
+            if (reverseBeforeUploadEl && reverseBeforeUploadEl.checked) {
+              prep = step('Reverse audio trước khi upload', 'Đang đảo chiều audio cục bộ…', function () {
+                return reverseAudioLocally(bytes).then(function (result) {
+                  bytes = result.bytes;
+                  uploadFilename = result.filename;
+                  logLine('Đã đảo chiều audio cục bộ (WAV), sẽ upload file: ' + uploadFilename);
+                });
+              });
+            }
+            return prep.then(function () {
+              return step('Upload nguyên bài lên Suno', 'Đang upload nguyên bài lên Suno…', function () {
+                return api.sunoUpload({ session: session, buffer: bytes, filename: uploadFilename, title: title, artist: '' });
+              });
+            });
+          })
+          .then(function (up) {
+            if (!up || !up.clipId) throw new Error('Suno không trả về clip ID sau khi upload.');
+            seedClipId = up.clipId;
+            logLine('clipId sau upload: ' + up.clipId);
+            // Độ dài đọc từ thẻ <audio> trên máy (readDuration ở bước đầu) có thể sai lệch
+            // (có khi gần một nửa) với vài kiểu MP3 VBR thiếu header seek chuẩn. Nếu dùng số
+            // sai này để đặt timeline Studio, bài sẽ bị render cụt mất phần sau. Xác nhận lại
+            // bằng đúng độ dài Suno tự đo được (metadata.duration) trước khi tạo project —
+            // best-effort: nếu Suno chưa trả kịp trong thời gian chờ, dùng tạm số đọc trên máy,
+            // không chặn hẳn pipeline.
+            return step('Xác nhận độ dài thật từ Suno', 'Đang xác nhận độ dài thật của bài từ Suno…', function () {
+              return api.sunoClipDuration({ session: session, clipId: up.clipId }).then(function (res) {
+                var real = res && res.durationSec;
+                if (typeof real === 'number' && real > 0) {
+                  if (Math.abs(real - duration) > 1) {
+                    logLine('⚠ Độ dài đọc trên máy (' + duration.toFixed(2) + 's) khác với Suno đo được (' + real.toFixed(2) + 's) — dùng số của Suno để tránh render bị cụt.');
+                  }
+                  duration = real;
+                }
+              }).catch(function (e) {
+                logLine('⚠ Không lấy được độ dài thật từ Suno (bỏ qua, dùng tạm số đọc trên máy ' + duration.toFixed(2) + 's): ' + cleanErrorMessage(e));
+              });
+            });
+          })
+          .then(function () {
+            return step('Tạo project Studio', 'Đang tạo project Studio…', function () {
+              return api.sunoSplitAssemble({
+                session: session,
+                seedClipId: seedClipId,
+                seedTitle: title,
+                seedDurationSec: duration,
+                parts: [{ clipId: seedClipId, number: 1, title: title, durationSec: duration }]
+              });
+            })
+              .then(function (asm) {
+                projectId = asm && asm.projectId;
+                if (!projectId) throw new Error('Suno không trả về project ID.');
+                var studioUrl = asm && asm.studioUrl;
+                logLine('projectId: ' + projectId + (studioUrl ? ' (' + studioUrl + ')' : ''));
+                if (!studioUrl) throw new Error('Không có link Studio để mở cửa sổ gửi lệnh AI.');
+                // Chẩn đoán (chỉ đọc, không đổi gì): log lại chính xác vị trí clip trên timeline
+                // ngay sau khi ghép xong — để so với lúc sau render, xác định bug cắt mất đoạn
+                // đầu (khi Reverse cục bộ bật) xảy ra ở bước nào.
+                return api.sunoSplitInspect({ session: session, projectId: projectId }).then(function (insp) {
+                  logLine('🔎 Sau ghép — tracks: ' + JSON.stringify((insp && insp.tracks) || []).slice(0, 900));
+                }).catch(function (e) {
+                  logLine('⚠ Inspect sau ghép lỗi (bỏ qua, chỉ để chẩn đoán): ' + cleanErrorMessage(e));
+                }).then(function () {
+                  // Mở 1 cửa sổ Suno Studio THẬT (ẩn), tự gõ lệnh vào ô chat + bấm Send, đợi
+                  // WAIT_AFTER_CHAT_MS ngay trong cửa sổ đó rồi mới đóng lại — để chính trình
+                  // duyệt Suno tự xử lý toàn bộ (kể cả phân tích warp cần cho các lệnh như
+                  // "Reverse"), không còn tự giả lập tool nào ở phía mình nữa.
+                  // Bấm Export → "Full Song" NGAY TRONG Studio thật (trong bước chat bên dưới) để ÉP
+                  // Suno lưu thật xuống server trước — AI chỉnh trong chat chỉ đổi trạng thái tạm thời
+                  // trong trình duyệt, CHƯA lưu. Sau khi đã lưu chắc chắn, bước Render qua Worker ở
+                  // dưới (đọc state mới nhất qua GET /api/studio/project) mới lấy đúng bản đã đảo chiều.
+                  return step('Gửi lệnh cho AI Studio', 'Đang mở Studio để gửi lệnh AI (đợi tới ' + Math.round(WAIT_AFTER_CHAT_MS / 1000) + 's)…', function () {
+                    return api.sunoStudioAgentStep({ studioUrl: studioUrl, message: FIXED_PROMPT, waitMs: WAIT_AFTER_CHAT_MS });
+                  }).catch(function (e) {
+                    // Best-effort — không cần biết AI có thực hiện xong hay không
+                    // (xem yêu cầu tính năng), nhưng vẫn ghi log rõ lỗi để biết.
+                    logLine('⚠ Gửi lệnh AI Studio lỗi (bỏ qua, vẫn tiếp tục render): ' + cleanErrorMessage(e));
+                  });
+                });
+              })
+              .then(function () {
+                // Chẩn đoán lần 2: log lại vị trí clip NGAY TRƯỚC KHI render (sau khi AI/Export
+                // đã lưu) — nếu khác với lần log ở trên, nghĩa là bước AI/Export đã làm lệch vị
+                // trí clip; nếu giống hệt, nghĩa là lỗi nằm ở chính bước render/encode phía Suno.
+                return api.sunoSplitInspect({ session: session, projectId: projectId }).then(function (insp) {
+                  logLine('🔎 Trước render — tracks: ' + JSON.stringify((insp && insp.tracks) || []).slice(0, 900));
+                }).catch(function (e) {
+                  logLine('⚠ Inspect trước render lỗi (bỏ qua, chỉ để chẩn đoán): ' + cleanErrorMessage(e));
+                });
+              })
+              .then(function () {
+                return step('Render bài hoàn chỉnh', 'Đang render bài hoàn chỉnh…', function () {
+                  return api.sunoSplitExport({ session: session, projectId: projectId, title: title });
+                });
+              })
+              .then(function (exp) {
+                exportClipId = exp && exp.clipId;
+                exportDuration = exp && exp.duration;
+                if (!exportClipId) throw new Error('Suno không trả về clip ID sau khi render.');
+                logLine('clipId sau render: ' + exportClipId + ', thời lượng: ' + (exportDuration != null ? exportDuration.toFixed(2) + 's' : '(không rõ)'));
+              });
+          })
+          .then(function () {
+            // Tuỳ chọn "Bỏ qua Fade Out": dừng ngay ở đây, dùng thẳng bản vừa render (đã gồm
+            // reverse) làm bản cuối cùng — không gọi bước Fade Out nữa. Mặc định (bỏ chọn) vẫn
+            // chạy đủ pipeline như trước, không đổi hành vi cũ.
+            if (skipFadeEl && skipFadeEl.checked) {
+              finalClipId = exportClipId;
+              finalTitle = title;
+              logLine('Bỏ qua Fade Out theo yêu cầu — dùng thẳng bản vừa render (đã gồm reverse).');
+              return;
+            }
+            var fadeAt = (typeof exportDuration === 'number' && exportDuration > FADE_SECONDS) ? (exportDuration - FADE_SECONDS) : 0;
+            logLine('Sẽ fade từ giây thứ ' + fadeAt.toFixed(2) + ' (fade ' + FADE_SECONDS + 's cuối)');
+            return step('Áp dụng Fade Out', 'Đang áp dụng Fade Out…', function () {
+              return api.sunoEditFade({ session: session, clipId: exportClipId, fadeOutTime: fadeAt, title: title + ' (Fade Out)' });
+            }).then(function (fade) {
+              finalClipId = fade && fade.clipId;
+              finalTitle = (fade && fade.title) || (title + ' (Fade Out)');
+              if (!finalClipId) throw new Error('Suno không trả về clip ID sau khi Fade Out.');
+              logLine('clipId cuối cùng (đã fade): ' + finalClipId);
+            });
+          })
+          .then(function () {
+            logLine('——— HOÀN TẤT — clipId cuối cùng: ' + finalClipId + ' ———');
+            setStatus('✅ Hoàn tất! Chọn Download để tải về, hoặc Tiếp tục để chạy bài khác.', 'ok');
+            // Dọn clip gốc (bản upload nguyên bài, chưa qua reverse/fade) khỏi thư viện Suno —
+            // chỉ còn lại bản cuối cùng đã hoàn chỉnh. Xoá vào thùng rác (có thể khôi phục
+            // trên Suno), không phải xoá vĩnh viễn. Best-effort — lỗi ở đây không được phép làm
+            // hỏng kết quả "Hoàn tất" đã báo ở trên. Chỉ xoá khi bản cuối KHÁC seedClipId — nếu
+            // đã bỏ qua Studio/Render (Reverse cục bộ + Bỏ qua Fade Out) thì finalClipId chính
+            // là seedClipId, không có gì để dọn cả (xoá sẽ mất luôn kết quả).
+            if (seedClipId && finalClipId && finalClipId !== seedClipId) {
+              api.sunoTrashClip({ session: session, ids: [seedClipId] }).then(function () {
+                logLine('Đã dọn clip gốc (upload nguyên bài) khỏi thư viện Suno: ' + seedClipId);
+              }).catch(function (e) {
+                logLine('⚠ Dọn clip gốc lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));
+              });
+            }
+            // Dọn thêm clip "lạ" Suno tự sinh (title trùng CHÍNH XÁC với tên bài, không phải
+            // "[Split] ..." cũng không phải "reversed-audio.wav") — đã xác nhận qua thực tế vẫn
+            // xuất hiện thêm bên cạnh seed/bản render trong cùng 1 lần chạy, chưa rõ cơ chế phía
+            // Suno sinh ra khi nào. Loại trừ seedClipId/finalClipId, chỉ xét clip mới tạo trong
+            // 10 phút gần nhất (mặc định) để không đụng nhầm bài khác cùng tên user có từ trước.
+            api.sunoTrashByTitle({ session: session, title: title, excludeIds: [seedClipId, finalClipId] }).then(function (res) {
+              if (res && res.trashedCount > 0) {
+                logLine('Đã dọn ' + res.trashedCount + ' clip "lạ" trùng tên "' + title + '" phát sinh thêm (ID: ' + res.ids.join(', ') + ').');
+              }
+            }).catch(function (e) {
+              logLine('⚠ Dọn clip trùng tên lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));
+            });
+            // Không tự tải về nữa (trước đây hay bị "Hết giờ tải audio (120s)"
+            // nếu người dùng không kịp bấm lưu) — hiện popup để người dùng tự
+            // chọn Download (mở popup Suno Download có sẵn, tự điền sẵn link)
+            // hoặc Tiếp tục (chỉ đóng popup, không tải gì cả).
+            fadeOutPendingClipId = finalClipId;
+            fadeOutPendingTitle = finalTitle;
+            if (fadeOutDoneMsg) fadeOutDoneMsg.textContent = '✅ Hoàn tất! Bài "' + finalTitle + '" đã sẵn sàng.';
+            if (fadeOutDoneModal) fadeOutDoneModal.classList.remove('hidden');
+          });
+      }).catch(function (e) {
+        var msg = cleanErrorMessage(e);
+        logLine('✗ PIPELINE DỪNG LẠI: ' + msg);
+        setStatus('✗ ' + msg, 'err');
+      }).then(function () {
+        running = false;
+        btn.disabled = false;
+      });
+    });
+  });
   </script>
 
 </body>

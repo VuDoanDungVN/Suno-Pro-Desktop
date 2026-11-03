@@ -68,6 +68,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sunoVerify: (session) => ipcRenderer.invoke('suno-verify', session),
   sunoSessionClear: () => ipcRenderer.invoke('suno-session-clear'),
   sunoUpload: (payload) => ipcRenderer.invoke('suno-upload', payload),
+  sunoClipDuration: (payload) => ipcRenderer.invoke('suno-clip-duration', payload),
+  sunoTrashByTitle: (payload) => ipcRenderer.invoke('suno-trash-by-title', payload),
   sunoNotify: (payload) => ipcRenderer.invoke('suno-notify', payload),
   onSunoUploadProgress: (callback) => {
     const listener = (_event, msg) => callback(msg);
@@ -90,6 +92,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sunoSplitClear: (key) => ipcRenderer.invoke('suno-split-clear', key),
   sunoDownloadSave: (filename) => ipcRenderer.invoke('suno-download-save', filename),
   sunoDownloadBytes: (audioUrl) => ipcRenderer.invoke('suno-download-bytes', audioUrl),
+
+  // Fade Out pipeline: upload nguyên bài (không cắt part) → chat AI → render → fade cuối bài.
+  sunoStudioAgentStep: (payload) => ipcRenderer.invoke('suno-studio-agent-step', payload),
+  sunoEditFade: (payload) => ipcRenderer.invoke('suno-edit-fade', payload),
 
   // Suno connect — in-app login window, session is captured automatically
   sunoConnect: () => ipcRenderer.invoke('suno-connect'),

@@ -491,7 +491,7 @@ export async function studioAssemble(request: Request, _env: Env): Promise<Respo
       endBeats: end,
       readStartBeats: 0,
       loop: { enabled: false, startBeats: 0, endBeats: len },
-      warp: { enabled: false, awaitingAnalysis: false, markersHash: null },
+      warp: { enabled: false, awaitingAnalysis: true, markersHash: null },
     });
     cursor = end;
   }
@@ -503,7 +503,7 @@ export async function studioAssemble(request: Request, _env: Env): Promise<Respo
       .replace(/\.(?:mp3|wav|m4a|flac|ogg|aac|webm)$/i, "")
       .replace(/[\s_-]*part\s*\d+$/i, "")
       .trim() || "Suno Toolkit Project";
-  const baseTitle = "[Split] " + rawTitle;
+  const baseTitle = "[Done] " + rawTitle;
   const saveProject = () => sunoStudioFetch("/api/studio/save-project", session, "POST", { project_id: projectId, state, title: baseTitle });
   await saveProject();
 
@@ -610,6 +610,15 @@ export async function studioInspect(request: Request, _env: Env): Promise<Respon
       startBeats: c?.startBeats ?? null,
       endBeats: c?.endBeats ?? null,
       mute: !!c?.mute,
+      // Thêm để chẩn đoán bug "mất đoạn đầu khi AI Reverse" — startBeats/endBeats không đổi
+      // giữa trước/sau AI edit (đã xác nhận qua test thực tế), nên nghi ngờ chuyển sang các
+      // field warp/reverse/đọc audio thay vì vị trí trên timeline.
+      reversed: !!c?.reversed,
+      readStartBeats: c?.readStartBeats ?? null,
+      warp: c?.warp ?? null,
+      loop: c?.loop ?? null,
+      fadeInBeats: c?.fadeInBeats ?? null,
+      fadeOutBeats: c?.fadeOutBeats ?? null,
     })),
   }));
   return json({ title: proj.title || "", latestVersion: proj.latest_version_id || "", timing: state.timing || null, tracks });
@@ -669,8 +678,13 @@ export async function studioExportStatus(request: Request, _env: Env): Promise<R
   const row = (clip && Array.isArray(clip.clips) ? clip.clips : []).find((r: any) => r?.id === renderId) || null;
   const status = String(row?.status || "").toLowerCase();
   if (/error|rejected|failed/.test(status)) throw new HttpError(502, "suno_render_failed", "Suno render bài thất bại.");
-  if (row && typeof row.audio_url === "string" && row.audio_url) {
-    return json({ done: true, clipId: renderId, songUrl: "https://suno.com/song/" + encodeURIComponent(renderId), audioUrl: row.audio_url });
+  // Suno trả `audio_url` TRƯỚC KHI clip thực sự xử lý xong hẳn (metadata như
+  // `duration` vẫn chưa có, và gọi edit/fade ngay lúc này bị Suno từ chối
+  // 409 "This song is still generating") — chỉ coi là "done" khi CẢ audio_url
+  // LẪN metadata.duration đã có, để bước sau (Fade Out) không bị đua với
+  // chính Suno đang hoàn thiện clip.
+  if (row && typeof row.audio_url === "string" && row.audio_url && typeof row?.metadata?.duration === "number") {
+    return json({ done: true, clipId: renderId, songUrl: "https://suno.com/song/" + encodeURIComponent(renderId), audioUrl: row.audio_url, duration: row.metadata.duration });
   }
   return json({ done: false });
 }
@@ -877,6 +891,49 @@ async function listAllClipsByTitleFilter(session: SunoSession, userId: string, t
   return matches;
 }
 
+/** `POST /suno/trash-by-title { title, excludeIds?, maxAgeMs? }` — dọn các clip KHÁC xuất hiện
+ * trong thư viện với title TRÙNG CHÍNH XÁC `title` (không phải chỉ chứa), loại trừ các id trong
+ * `excludeIds`, chỉ xét clip MỚI tạo trong `maxAgeMs` gần nhất (mặc định 10 phút) để tránh đụng
+ * nhầm 1 bài khác cùng tên user tự upload từ trước không liên quan. Dùng để dọn 1 clip "lạ" Suno
+ * tự sinh thêm (cơ chế phía Suno chưa rõ) song song với seed/bản render trong pipeline Fade Out —
+ * đã xác nhận qua test thực tế trên thư viện người dùng.
+ */
+export async function trashByExactTitle(request: Request, _env: Env): Promise<Response> {
+  const body = await readJson<Record<string, unknown> & { title?: unknown; excludeIds?: unknown; maxAgeMs?: unknown }>(request);
+  const session = readSession(body);
+  const userId = sunoJwtSub(session.token);
+  if (!userId) throw new HttpError(400, "missing_user_id", "Không xác định được user ID từ session.");
+  const title = cleanText(body.title, 200);
+  if (!title) throw new HttpError(400, "missing_title", "Thiếu title.");
+  const exclude = new Set(Array.isArray(body.excludeIds) ? body.excludeIds.filter((x): x is string => typeof x === "string") : []);
+  const maxAgeMsRaw = Number(body.maxAgeMs);
+  const maxAgeMs = Number.isFinite(maxAgeMsRaw) && maxAgeMsRaw > 0 ? maxAgeMsRaw : 10 * 60 * 1000;
+  const cutoff = Date.now() - maxAgeMs;
+  const matches: Array<{ id: string; title: string }> = [];
+  let cursor: string | null = null;
+  for (let guard = 0; guard < 50; guard++) {
+    const resBody = { cursor, limit: 100, filters: { trashed: "False", user: { presence: "True", userId } } };
+    const res = await sunoStudioFetch("/api/feed/v3", session, "POST", resBody, 30000);
+    const clips = Array.isArray(res && res.clips) ? res.clips : [];
+    for (const c of clips) {
+      if (!c || c.title !== title || exclude.has(c.id)) continue;
+      const createdAt = typeof c.created_at === "string" ? Date.parse(c.created_at) : NaN;
+      if (Number.isFinite(createdAt) && createdAt < cutoff) continue; // quá cũ — không đụng vào
+      matches.push({ id: c.id, title: c.title });
+    }
+    cursor = res && res.next_cursor;
+    if (!cursor) break;
+    await sleep(250);
+  }
+  const ids = matches.map((m) => m.id);
+  for (let i = 0; i < ids.length; i += 10) {
+    const batch = ids.slice(i, i + 10);
+    await sunoStudioFetch("/api/gen/trash", session, "POST", { trash: true, clip_ids: batch }, 30000);
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return json({ trashedCount: ids.length, ids });
+}
+
 /** `POST /suno/cleanup { token, cookieHeader }` — chuyển các clip "_part" vào thùng rác (reversible). */
 export async function cleanup(request: Request, _env: Env): Promise<Response> {
   const body = await readJson<Record<string, unknown>>(request);
@@ -1052,4 +1109,123 @@ export async function mangoRights(request: Request, _env: Env): Promise<Response
   const contentKey = await gcmUnwrap(rights.key, clipId, uk);
   const contentIv = await gcmUnwrap(rights.iv, clipId, uk);
   return json({ contentKey: bytesToB64(contentKey), contentIv: bytesToB64(contentIv) });
+}
+
+// ─── Chat AI của Studio + Fade Out — 2 API KHÁC HOST so với mọi thứ ở trên: không phải
+// studio-api.prod.suno.com mà là chính suno.com/a/api/... (BFF site, cùng domain web app).
+// Dò được qua Network tab khi gõ chat trong Studio thật (/a/api/agent/step) và khi bấm
+// Fade Out trong menu Edit của 1 bài (/a/api/edit/fade/{clipId}/). ──────────────────────
+
+const SUNO_SITE_API = "https://suno.com/a/api";
+
+async function sunoSiteFetch(
+  path: string,
+  session: SunoSession,
+  method: "GET" | "POST" = "GET",
+  body?: unknown,
+  timeoutMs = 30000,
+): Promise<any> {
+  const headers = sunoBaseHeaders(session);
+  const payload = body !== undefined ? JSON.stringify(body) : undefined;
+  if (payload !== undefined) headers["Content-Type"] = "application/json";
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(SUNO_SITE_API + path, {
+      method,
+      headers,
+      signal: ctrl.signal,
+      ...(payload !== undefined ? { body: payload } : {}),
+    });
+    const text = await res.text();
+    let data: any = null;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: String(text).slice(0, 200) };
+    }
+    if (!res.ok) {
+      if (res.status === 429) throw new HttpError(429, "rate_limited", "Suno đang giới hạn tốc độ (429).");
+      // Giữ nguyên status 409 THẬT của Suno (khác 429/502 ở trên) — case này
+      // chủ yếu là "This song is still generating" khi gọi edit/fade ngay sau
+      // lúc export vừa báo xong, để hàm gọi phía trên tự quyết định có retry
+      // hay không thay vì bị gộp chung vào "suno_error" (502) mất thông tin.
+      if (res.status === 409) {
+        const detail = (data && (data.detail || data.detail_fallback)) || "Suno báo xung đột (409).";
+        throw new HttpError(409, "suno_conflict", String(detail));
+      }
+      throw new HttpError(502, "suno_error", "Suno API HTTP " + res.status + " " + JSON.stringify(data).slice(0, 220));
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** `POST /suno/edit/fade/start { clipId, fadeOutTime, title? }` — bấm nút "Fade Out" hộ
+ * (menu Edit của 1 bài), trả về `actionClipId` (clip mới, đang được Suno xử lý). */
+export async function editFadeStart(request: Request, _env: Env): Promise<Response> {
+  const body = await readJson<Record<string, unknown>>(request);
+  const session = readSession(body);
+  const clipId = cleanText(body.clipId, 100);
+  const fadeOutTime = Number(body.fadeOutTime);
+  const title = cleanText(body.title, 200) || "";
+  if (!clipId) throw new HttpError(400, "missing_clip_id", "Thiếu clip ID.");
+  if (!Number.isFinite(fadeOutTime) || fadeOutTime < 0) throw new HttpError(400, "bad_fade_time", "Thời điểm fade không hợp lệ.");
+
+  // Dù export đã chờ đủ `metadata.duration` (xem studioExportStatus), Suno vẫn có thể
+  // còn hoàn thiện clip thêm vài giây nữa và từ chối edit/fade với 409 "This song is
+  // still generating" — tự chờ + thử lại thay vì để người dùng bấm lại tay. Cloudflare
+  // không tính thời gian chờ fetch (I/O) vào CPU time nên giữ request mở ~2 phút là an
+  // toàn, cùng kiểu với các vòng poll khác trong file này (sunoStudioFetch, downloadPrepare).
+  const EDIT_FADE_RETRY_ATTEMPTS = 24;
+  const EDIT_FADE_RETRY_DELAY_MS = 5000;
+  let result: any = null;
+  let lastConflict = "";
+  for (let attempt = 0; attempt < EDIT_FADE_RETRY_ATTEMPTS; attempt++) {
+    try {
+      result = await sunoSiteFetch("/edit/fade/" + encodeURIComponent(clipId) + "/", session, "POST", {
+        fade_out_time: fadeOutTime,
+        title,
+      });
+      break;
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 409) {
+        lastConflict = e.message;
+        await sleep(EDIT_FADE_RETRY_DELAY_MS);
+        continue;
+      }
+      throw e;
+    }
+  }
+  if (!result) throw new HttpError(409, "suno_conflict", `Suno vẫn báo "đang xử lý" sau ${EDIT_FADE_RETRY_ATTEMPTS * EDIT_FADE_RETRY_DELAY_MS / 1000}s chờ (${lastConflict}) — thử lại sau.`);
+  const actionClipId = result && result.action_clip_id;
+  if (!actionClipId || typeof actionClipId !== "string") throw new HttpError(502, "suno_error", "Suno không trả về action_clip_id cho fade.");
+  return json({ actionClipId });
+}
+
+/** `POST /suno/edit/fade/status { actionClipId }` — poll bằng CHÍNH cơ chế đã dùng để poll
+ * render (feed/v3 theo clipId) thay vì endpoint /video/generate/.../status/ chưa rõ schema
+ * response — feed/v3 đã biết chắc trả `status`/`audio_url` cho mọi loại clip, kể cả bản edit
+ * fade (xem metadata.type: "edit_fade" trong response capture thật). */
+export async function editFadeStatus(request: Request, _env: Env): Promise<Response> {
+  const body = await readJson<Record<string, unknown>>(request);
+  const session = readSession(body);
+  const actionClipId = cleanText(body.actionClipId, 100);
+  if (!actionClipId) throw new HttpError(400, "missing_action_clip_id", "Thiếu action clip ID.");
+
+  const clip = await sunoStudioFetch(
+    "/api/feed/v3",
+    session,
+    "POST",
+    { filters: { ids: { presence: "True", clipIds: [actionClipId] } }, limit: 1 },
+    30000,
+  );
+  const row = (clip && Array.isArray(clip.clips) ? clip.clips : []).find((r: any) => r?.id === actionClipId) || null;
+  const status = String(row?.status || "").toLowerCase();
+  if (/error|rejected|failed/.test(status)) throw new HttpError(502, "suno_fade_failed", "Suno xử lý Fade Out thất bại.");
+  if (row && typeof row.audio_url === "string" && row.audio_url) {
+    return json({ done: true, clipId: actionClipId, title: row.title || "", songUrl: "https://suno.com/song/" + encodeURIComponent(actionClipId) });
+  }
+  return json({ done: false });
 }

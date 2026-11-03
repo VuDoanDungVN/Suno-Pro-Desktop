@@ -8,10 +8,11 @@
 // đây là điểm khác biệt cốt lõi so với chỉ gate ở app: revoke 1 KEY là chặn ngay lập tức, bất kể
 // app cài trên máy khách đã bị patch bỏ phần kiểm tra license hay chưa.
 
-import { CORS_HEADERS, HttpError, json } from "./http";
+import { CORS_HEADERS, HttpError, json, readJson } from "./http";
 import {
   Ctx,
   activate,
+  adminBanIpPermanent,
   adminCreate,
   adminCreateBulk,
   adminDelete,
@@ -20,6 +21,7 @@ import {
   adminGetDownloadUrl,
   adminGetTrialCode,
   adminList,
+  adminListIpBans,
   adminListTrialLeads,
   adminRenewExpiredTrials,
   adminResetDevice,
@@ -27,6 +29,7 @@ import {
   adminSetAppVersion,
   adminSetDownloadUrl,
   adminSetTrialCode,
+  adminUnbanIp,
   adminUpdate,
   appVersionCheck,
   authorize,
@@ -43,7 +46,10 @@ import { muaKeyPageHtml, muaKeySuccessPageHtml } from "./mua-key";
 import { adminListPayments, createCheckout, getOrderStatus, stripeWebhook } from "./stripe";
 import {
   cleanup,
+  trashByExactTitle,
   downloadPrepare,
+  editFadeStart,
+  editFadeStatus,
   generate,
   generateStatus,
   mangoRights,
@@ -125,6 +131,14 @@ export default {
         if (pathname === "/admin/app-version" && method === "GET") return adminGetAppVersion(env);
         if (pathname === "/admin/app-version" && method === "POST") return adminSetAppVersion(request, env);
         if (pathname === "/admin/payments" && method === "GET") return adminListPayments(env);
+        if (pathname === "/admin/ip-bans" && method === "GET") return adminListIpBans(env);
+        const ipBanMatch = pathname.match(/^\/admin\/ip-bans\/([^/]+)(\/ban-permanent)?$/);
+        if (ipBanMatch && !ipBanMatch[2] && method === "DELETE") return adminUnbanIp(env, decodeURIComponent(ipBanMatch[1]));
+        if (ipBanMatch && ipBanMatch[2] === "/ban-permanent" && method === "POST") {
+          const body = await readJson<{ reason?: unknown }>(request);
+          const reason = typeof body.reason === "string" && body.reason ? body.reason : null;
+          return adminBanIpPermanent(env, decodeURIComponent(ipBanMatch[1]), reason);
+        }
         const m = pathname.match(/^\/admin\/licenses\/([0-9a-f-]{8,36})(\/reset-device|\/rotate-key)?$/);
         if (m && !m[2] && method === "PATCH") return adminUpdate(request, env, m[1]);
         if (m && !m[2] && method === "DELETE") return adminDelete(env, m[1]);
@@ -218,6 +232,10 @@ async function routeSuno(pathname: string, method: string, request: Request, env
     requireApp(ctx);
     return cleanup(request, env);
   }
+  if (pathname === "/suno/trash-by-title" && method === "POST") {
+    requireApp(ctx);
+    return trashByExactTitle(request, env);
+  }
   if (pathname === "/suno/permanent-delete" && method === "POST") {
     requireApp(ctx);
     return permanentDelete(request, env);
@@ -249,6 +267,14 @@ async function routeSuno(pathname: string, method: string, request: Request, env
   if (pathname === "/suno/mango-rights" && method === "POST") {
     requireApp(ctx);
     return mangoRights(request, env);
+  }
+  if (pathname === "/suno/edit/fade/start" && method === "POST") {
+    requireApp(ctx);
+    return editFadeStart(request, env);
+  }
+  if (pathname === "/suno/edit/fade/status" && method === "POST") {
+    requireApp(ctx);
+    return editFadeStatus(request, env);
   }
   return null;
 }
