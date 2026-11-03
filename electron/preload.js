@@ -93,7 +93,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sunoDownloadSave: (filename) => ipcRenderer.invoke('suno-download-save', filename),
   sunoDownloadBytes: (audioUrl) => ipcRenderer.invoke('suno-download-bytes', audioUrl),
 
-  // Fade Out pipeline: upload nguyên bài (không cắt part) → chat AI → render → fade cuối bài.
+  // Reverse pipeline: upload nguyên bài (không cắt part) → chat AI → render → fade cuối bài (tuỳ chọn).
   sunoStudioAgentStep: (payload) => ipcRenderer.invoke('suno-studio-agent-step', payload),
   sunoEditFade: (payload) => ipcRenderer.invoke('suno-edit-fade', payload),
 

@@ -457,21 +457,20 @@
         <div class="suno-split-step-row suno-prep-actions-row">
           <button id="sunoSplitLoad" class="suno-connect-btn suno-import-btn" title="Chọn file MP3 cần chia nhỏ"><span aria-hidden="true">＋</span> Chọn bài hát</button>
           <button id="openYoutubeBtn" class="suno-test-btn" type="button" title="Tải audio từ YouTube"><span aria-hidden="true">▶</span> YouTube</button>
-          <button id="fadeOutPipelineBtn" class="suno-test-btn" type="button" title="Upload nguyên bài lên Studio (không cắt part), áp dụng lệnh AI cố định, render và tự động Fade Out 5 giây cuối">⤵ Fade Out</button>
+          <button id="reversePipelineBtn" class="suno-test-btn" type="button" title="Upload nguyên bài lên Studio (không cắt part), đảo chiều cục bộ trước khi upload, áp dụng lệnh AI cố định, render rồi tải về">⤵ Reverse</button>
         </div>
-        <div class="suno-split-step-row" style="margin-top:4px;">
-          <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;" title="Nếu bật: đảo ngược (reverse) audio ngay trên máy TRƯỚC khi upload lên Suno, chính xác tuyệt đối theo từng mẫu âm thanh.">
-            <input type="checkbox" id="fadeOutReverseBeforeUpload">
-            Reverse audio trước khi upload (xử lý cục bộ)
-          </label>
-        </div>
-        <div class="suno-split-step-row" style="margin-top:4px;">
-          <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;" title="Nếu bật: dừng lại ngay sau khi render xong (đã gồm reverse), không áp dụng Fade Out, tải thẳng bản đó về.">
-            <input type="checkbox" id="fadeOutSkipFade">
+        <!-- Luôn đảo chiều (reverse) audio cục bộ trước khi upload — không còn là tuỳ chọn nữa,
+             nên bỏ hẳn checkbox; xem reverseAudioLocally() luôn được gọi không điều kiện. -->
+        <!-- Hệ thống không dùng tới Fade Out nữa — ẩn checkbox này, luôn coi như đã tick (bỏ qua
+             Fade Out), không xoá phần tử để không phải sửa lại logic step() đang đọc
+             reverseSkipFade.checked ở dưới. -->
+        <div class="suno-split-step-row" style="margin-top:4px; display:none;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+            <input type="checkbox" id="reverseSkipFade" checked disabled>
             Bỏ qua Fade Out (chỉ lấy bản đã render)
           </label>
         </div>
-        <div id="fadeOutPipelineStatus" class="suno-status" style="display:none; margin-top:6px;"></div>
+        <div id="reversePipelineStatus" class="suno-status" style="display:none; margin-top:6px;"></div>
         <div class="suno-prep-file-row hidden" id="sunoPrepFileRow">
           <div class="suno-prep-thumb" id="sunoPrepThumbWrap">
             <img id="sunoPrepThumbImg" class="suno-prep-thumb-img hidden" alt="">
@@ -1208,22 +1207,32 @@
       </div>
     </div>
 
-    <!-- ── Popup hoàn tất riêng cho pipeline Fade Out — không tự tải về nữa,
-         để người dùng tự chọn Download (mở popup Suno Download có sẵn, tự
-         điền link + bấm Download hộ) hoặc Tiếp tục (chỉ đóng popup). Tách
-         biệt hoàn toàn khỏi popup "uploadConfirmModal" của pipeline Split
-         để không đụng tới logic/state của pipeline đó. ── -->
-    <div id="fadeOutDoneModal" class="cm-modal-overlay hidden">
-      <div class="cm-modal" style="width:340px;" role="dialog" aria-modal="true" aria-labelledby="fadeOutDoneTitle">
+    <!-- ── Popup xuyên suốt pipeline Reverse — 1 popup DUY NHẤT từ lúc bắt đầu tới lúc xong
+         (giống kiểu uploadConfirmModal của pipeline Split/Import/YouTube: spinner + tên bài +
+         % tiến trình + đồng hồ khi đang chạy, rồi đổi sang Download/Tiếp tục khi xong) — nhưng
+         là 1 phần tử HOÀN TOÀN RIÊNG, không dùng chung state/logic với uploadConfirmModal. Nút
+         "☰" chỉ gọi window.sunoOpenLogViewer() (hàm dùng chung, chỉ MỞ THÊM popup log đè lên
+         trên, không đụng gì tới popup này). ── -->
+    <div id="reverseDoneModal" class="cm-modal-overlay hidden">
+      <div class="cm-modal" style="width:340px;position:relative;" role="dialog" aria-modal="true" aria-labelledby="reverseDoneTitle">
+        <button id="reverseLogBtn" type="button" title="Xem nhật ký tiến trình" aria-label="Xem nhật ký tiến trình" style="position:absolute;top:8px;right:36px;background:transparent;border:none;cursor:pointer;font-size:15px;line-height:1;padding:5px;opacity:.6;z-index:1;">☰</button>
         <div class="cm-modal-header">
-          <span id="fadeOutDoneTitle">✅ Hoàn tất</span>
-          <button id="closeFadeOutDoneBtn" class="cm-modal-close" type="button" aria-label="Đóng">✕</button>
+          <span id="reverseDoneTitle">⏳ Đang xử lý</span>
+          <button id="closeReverseDoneBtn" class="cm-modal-close" type="button" aria-label="Đóng">✕</button>
         </div>
-        <div class="cm-modal-body">
-          <div id="fadeOutDoneMsg" class="suno-status ok" style="margin-bottom:10px;"></div>
-          <div class="suno-split-step-row" style="gap:8px;">
-            <button id="fadeOutDoneDownloadBtn" class="suno-connect-btn" type="button" style="flex:1;">⬇ Download</button>
-            <button id="fadeOutDoneContinueBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;">Tiếp tục</button>
+        <div class="cm-modal-body" style="text-align:center;">
+          <div id="reverseSpinner" class="cm-spinner" aria-hidden="true" style="margin:0 auto;"></div>
+          <div id="reverseSongName" class="suno-timer-songname" style="margin:8px 0 2px;"></div>
+          <div id="reverseStepLabel" class="suno-status" style="margin-bottom:6px;"></div>
+          <div id="reverseRunTimer" class="suno-run-timer"></div>
+          <div id="reverseProgressWrap" class="suno-upload-progress-wrap">
+            <div class="suno-upload-progress-track"><div id="reverseProgressBar" class="suno-upload-progress-bar" style="width:0%;"></div></div>
+            <div id="reverseProgressPct" class="suno-upload-progress-pct">0%</div>
+          </div>
+          <div id="reverseDoneMsg" class="suno-status ok" style="margin:10px 0 6px;" hidden></div>
+          <div id="reverseDoneActions" class="suno-split-step-row" style="gap:8px;" hidden>
+            <button id="reverseDoneDownloadBtn" class="suno-connect-btn" type="button" style="flex:1;">⬇ Download</button>
+            <button id="reverseDoneContinueBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;">Tiếp tục</button>
           </div>
         </div>
       </div>
@@ -5112,54 +5121,129 @@
     });
   </script>
 
-  <!-- ── "Fade Out" — pipeline ĐỘC LẬP, không đụng tới luồng cắt part/upload-part
+  <!-- ── "Reverse" — pipeline ĐỘC LẬP, không đụng tới luồng cắt part/upload-part
        hiện có: upload nguyên bài 1 lần → tạo project Studio → gửi lệnh cố định
-       vào chat AI → đợi 10s → render → Fade Out 5 giây cuối → tải + lưu file. ── -->
+       vào chat AI → đợi 10s → render → Fade Out 5 giây cuối (tuỳ chọn) → tải + lưu file. ── -->
   <script>
   document.addEventListener('DOMContentLoaded', function () {
     var api = window.electronAPI;
-    var btn = document.getElementById('fadeOutPipelineBtn');
-    var statusEl = document.getElementById('fadeOutPipelineStatus');
-    var skipFadeEl = document.getElementById('fadeOutSkipFade');
-    var reverseBeforeUploadEl = document.getElementById('fadeOutReverseBeforeUpload');
-    var fadeOutDoneModal = document.getElementById('fadeOutDoneModal');
-    var fadeOutDoneMsg = document.getElementById('fadeOutDoneMsg');
-    var fadeOutDoneDownloadBtn = document.getElementById('fadeOutDoneDownloadBtn');
-    var fadeOutDoneContinueBtn = document.getElementById('fadeOutDoneContinueBtn');
-    var closeFadeOutDoneBtn = document.getElementById('closeFadeOutDoneBtn');
+    var btn = document.getElementById('reversePipelineBtn');
+    var statusEl = document.getElementById('reversePipelineStatus');
+    var skipFadeEl = document.getElementById('reverseSkipFade');
+    var reverseDoneModal = document.getElementById('reverseDoneModal');
+    var reverseDoneTitleEl = document.getElementById('reverseDoneTitle');
+    var reverseDoneMsg = document.getElementById('reverseDoneMsg');
+    var reverseDoneActions = document.getElementById('reverseDoneActions');
+    var reverseDoneDownloadBtn = document.getElementById('reverseDoneDownloadBtn');
+    var reverseDoneContinueBtn = document.getElementById('reverseDoneContinueBtn');
+    var closeReverseDoneBtn = document.getElementById('closeReverseDoneBtn');
+    var reverseLogBtn = document.getElementById('reverseLogBtn');
+    var reverseSpinner = document.getElementById('reverseSpinner');
+    var reverseSongName = document.getElementById('reverseSongName');
+    var reverseStepLabel = document.getElementById('reverseStepLabel');
+    var reverseRunTimer = document.getElementById('reverseRunTimer');
+    var reverseProgressWrap = document.getElementById('reverseProgressWrap');
+    var reverseProgressBar = document.getElementById('reverseProgressBar');
+    var reverseProgressPct = document.getElementById('reverseProgressPct');
     if (!api || !btn || !statusEl) return;
 
-    var FIXED_PROMPT = 'Reverse lại audio này cho tôi. Lưu ý : Không được split cắt đoạn audio, chỉ reverse toàn bộ audio. Đảm bảo audio được reverse đúng và đầy đủ.';
-    var WAIT_AFTER_CHAT_MS = 60000;
     var FADE_SECONDS = 5;
     var running = false;
-    var fadeOutPendingClipId = null;
-    var fadeOutPendingTitle = null;
+    var reversePendingClipId = null;
+    var reversePendingTitle = null;
 
-    function hideFadeOutDoneModal() {
-      if (fadeOutDoneModal) fadeOutDoneModal.classList.add('hidden');
+    // ── Đồng hồ đếm thời gian + % tiến trình (theo số bước đã xong / tổng số bước của lần
+    // chạy này — không có tín hiệu byte-level như lúc upload file thường nên tính thô theo
+    // bước, đủ để người dùng thấy đang chạy tới đâu). Giống kiểu hiển thị của popup
+    // Import/YouTube nhưng hoàn toàn tách biệt, không dùng chung biến/hàm nào với popup đó. ──
+    var reverseStartedAt = null;
+    var reverseTimerHandle = null;
+    var reverseTotalSteps = 1;
+    var reverseCompletedSteps = 0;
+    function formatReverseElapsed(ms) {
+      var totalSec = Math.max(0, Math.floor(ms / 1000));
+      var m = Math.floor(totalSec / 60);
+      var s = totalSec % 60;
+      return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
     }
-    if (fadeOutDoneDownloadBtn) {
-      fadeOutDoneDownloadBtn.addEventListener('click', function () {
-        if (!fadeOutPendingClipId) { hideFadeOutDoneModal(); return; }
+    function startReverseTimer() {
+      reverseStartedAt = Date.now();
+      if (reverseRunTimer) reverseRunTimer.textContent = '⏱ 00:00';
+      if (reverseTimerHandle) clearInterval(reverseTimerHandle);
+      reverseTimerHandle = setInterval(function () {
+        if (!reverseStartedAt || !reverseRunTimer) return;
+        reverseRunTimer.textContent = '⏱ ' + formatReverseElapsed(Date.now() - reverseStartedAt);
+      }, 1000);
+    }
+    function stopReverseTimer() {
+      if (reverseTimerHandle) { clearInterval(reverseTimerHandle); reverseTimerHandle = null; }
+    }
+    function updateReverseProgress(stepLabel) {
+      var pct = reverseTotalSteps > 0 ? Math.min(100, Math.round(reverseCompletedSteps / reverseTotalSteps * 100)) : 0;
+      if (reverseProgressBar) reverseProgressBar.style.width = pct + '%';
+      if (reverseProgressPct) reverseProgressPct.textContent = pct + '%';
+      if (reverseStepLabel && stepLabel) reverseStepLabel.textContent = stepLabel;
+    }
+    // Gọi khi bắt đầu 1 lần chạy mới — hiện popup ở trạng thái "đang xử lý" (spinner, tên bài,
+    // % = 0), ẩn phần Download/Tiếp tục. `totalSteps` tính trước theo đúng các bước SẼ chạy
+    // (gồm/không gồm bước Reverse cục bộ + bước Fade Out tuỳ theo 2 checkbox lúc bấm nút).
+    function showReverseRunning(songTitle, totalSteps) {
+      reverseCompletedSteps = 0;
+      reverseTotalSteps = totalSteps > 0 ? totalSteps : 1;
+      if (reverseDoneTitleEl) reverseDoneTitleEl.textContent = '⏳ Đang xử lý';
+      if (reverseSpinner) reverseSpinner.hidden = false;
+      if (reverseSongName) reverseSongName.textContent = '🎵 ' + songTitle;
+      if (reverseProgressWrap) reverseProgressWrap.hidden = false;
+      if (reverseDoneMsg) reverseDoneMsg.hidden = true;
+      if (reverseDoneActions) reverseDoneActions.hidden = true;
+      updateReverseProgress('Đang bắt đầu…');
+      startReverseTimer();
+      if (reverseDoneModal) reverseDoneModal.classList.remove('hidden');
+    }
+    // Gọi khi đã có kết quả cuối cùng — chuyển popup sang trạng thái "xong", hiện 2 nút.
+    function showReverseDone(msgText) {
+      stopReverseTimer();
+      if (reverseDoneTitleEl) reverseDoneTitleEl.textContent = '✅ Hoàn tất';
+      if (reverseSpinner) reverseSpinner.hidden = true;
+      if (reverseProgressWrap) reverseProgressWrap.hidden = true;
+      if (reverseStepLabel) reverseStepLabel.textContent = '';
+      if (reverseDoneMsg) { reverseDoneMsg.hidden = false; reverseDoneMsg.textContent = msgText; }
+      if (reverseDoneActions) reverseDoneActions.hidden = false;
+    }
+
+    function hideReverseDoneModal() {
+      stopReverseTimer();
+      if (reverseDoneModal) reverseDoneModal.classList.add('hidden');
+    }
+    if (reverseDoneDownloadBtn) {
+      reverseDoneDownloadBtn.addEventListener('click', function () {
+        if (!reversePendingClipId) { hideReverseDoneModal(); return; }
         var dlModal = document.getElementById('sunoDownloadModal');
         var dlLinkInput = document.getElementById('sunoDlLink');
         var dlBtn = document.getElementById('sunoDlBtn');
-        hideFadeOutDoneModal();
+        hideReverseDoneModal();
         if (!dlModal || !dlLinkInput || !dlBtn) return;
-        dlLinkInput.value = 'https://suno.com/song/' + fadeOutPendingClipId;
+        dlLinkInput.value = 'https://suno.com/song/' + reversePendingClipId;
         dlModal.classList.remove('hidden');
         dlBtn.click();
       });
     }
-    if (fadeOutDoneContinueBtn) {
-      fadeOutDoneContinueBtn.addEventListener('click', function () {
-        hideFadeOutDoneModal();
+    if (reverseDoneContinueBtn) {
+      reverseDoneContinueBtn.addEventListener('click', function () {
+        hideReverseDoneModal();
         setStatus('', '');
       });
     }
-    if (closeFadeOutDoneBtn) {
-      closeFadeOutDoneBtn.addEventListener('click', hideFadeOutDoneModal);
+    if (closeReverseDoneBtn) {
+      closeReverseDoneBtn.addEventListener('click', hideReverseDoneModal);
+    }
+    // Icon "☰" chỉ mở thêm popup Nhật ký tiến trình (hàm dùng chung toàn app), không đụng gì
+    // tới trạng thái popup này.
+    if (reverseLogBtn) {
+      reverseLogBtn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        if (typeof window.sunoOpenLogViewer === 'function') window.sunoOpenLogViewer();
+      });
     }
 
     function setStatus(text, cls) {
@@ -5169,11 +5253,11 @@
       statusEl.className = 'suno-status' + (cls ? ' ' + cls : '');
     }
 
-    // Ghi vào debug.log (xem menu ☰ → Nhật ký tiến trình) — tag "[fadeout]" để
+    // Ghi vào debug.log (xem menu ☰ → Nhật ký tiến trình) — tag "[reverse]" để
     // lọc/tìm riêng, giữ nguyên ký hiệu ✗/✅/⚠/▶ để màn Nhật ký tự tô màu đúng
     // (xem parseLogLine ở phần "Nhật ký tiến trình" phía trên file này).
     function logLine(text) {
-      if (api && typeof api.debugLog === 'function') api.debugLog('[fadeout] ' + text);
+      if (api && typeof api.debugLog === 'function') api.debugLog('[reverse] ' + text);
     }
 
     // Electron bọc lỗi ném ra từ ipcMain.handle thành chuỗi dạng
@@ -5191,8 +5275,11 @@
     function step(name, statusText, fn) {
       logLine('▶ Bắt đầu: ' + name);
       setStatus('⏳ ' + statusText, '');
+      updateReverseProgress(name);
       return Promise.resolve().then(fn).then(function (result) {
         logLine('✅ Xong: ' + name);
+        reverseCompletedSteps++;
+        updateReverseProgress(name);
         return result;
       }, function (e) {
         var msg = cleanErrorMessage(e);
@@ -5311,7 +5398,12 @@
         btn.disabled = true;
         var session, title, duration, projectId, seedClipId, exportClipId, exportDuration, finalClipId, finalTitle;
         title = fileBaseName(filePath);
-        logLine('——— Bắt đầu pipeline Fade Out cho file: ' + filePath + ' ———');
+        logLine('——— Bắt đầu pipeline Reverse cho file: ' + filePath + ' ———');
+        // 8 bước cố định (Đọc file, Reverse cục bộ, Upload, Xác nhận độ dài, Tạo project, Gửi
+        // lệnh AI, Render, Dọn dẹp) — Reverse giờ luôn chạy (không còn tuỳ chọn), Fade Out luôn
+        // bị bỏ qua (hệ thống không dùng tới) nên không cộng thêm bước nào cho nó nữa.
+        var totalSteps = 8;
+        showReverseRunning(title, totalSteps);
 
         return step('Đọc file + session', 'Đang đọc file…', function () {
           return Promise.all([getSession(), readDuration(filePath), api.readAudioFile(filePath)]);
@@ -5322,17 +5414,13 @@
             var bytes = res[2];
             var uploadFilename = filePath.split(/[\\/]/).pop();
             logLine('Thời lượng file gốc: ' + duration.toFixed(2) + 's');
-            var prep = Promise.resolve();
-            if (reverseBeforeUploadEl && reverseBeforeUploadEl.checked) {
-              prep = step('Reverse audio trước khi upload', 'Đang đảo chiều audio cục bộ…', function () {
-                return reverseAudioLocally(bytes).then(function (result) {
-                  bytes = result.bytes;
-                  uploadFilename = result.filename;
-                  logLine('Đã đảo chiều audio cục bộ (WAV), sẽ upload file: ' + uploadFilename);
-                });
+            return step('Reverse audio trước khi upload', 'Đang đảo chiều audio cục bộ…', function () {
+              return reverseAudioLocally(bytes).then(function (result) {
+                bytes = result.bytes;
+                uploadFilename = result.filename;
+                logLine('Đã đảo chiều audio cục bộ, sẽ upload file: ' + uploadFilename);
               });
-            }
-            return prep.then(function () {
+            }).then(function () {
               return step('Upload nguyên bài lên Suno', 'Đang upload nguyên bài lên Suno…', function () {
                 return api.sunoUpload({ session: session, buffer: bytes, filename: uploadFilename, title: title, artist: '' });
               });
@@ -5377,7 +5465,7 @@
                 if (!projectId) throw new Error('Suno không trả về project ID.');
                 var studioUrl = asm && asm.studioUrl;
                 logLine('projectId: ' + projectId + (studioUrl ? ' (' + studioUrl + ')' : ''));
-                if (!studioUrl) throw new Error('Không có link Studio để mở cửa sổ gửi lệnh AI.');
+                if (!studioUrl) throw new Error('Không có link Studio để xử lý.');
                 // Chẩn đoán (chỉ đọc, không đổi gì): log lại chính xác vị trí clip trên timeline
                 // ngay sau khi ghép xong — để so với lúc sau render, xác định bug cắt mất đoạn
                 // đầu (khi Reverse cục bộ bật) xảy ra ở bước nào.
@@ -5386,16 +5474,10 @@
                 }).catch(function (e) {
                   logLine('⚠ Inspect sau ghép lỗi (bỏ qua, chỉ để chẩn đoán): ' + cleanErrorMessage(e));
                 }).then(function () {
-                  // Mở 1 cửa sổ Suno Studio THẬT (ẩn), tự gõ lệnh vào ô chat + bấm Send, đợi
-                  // WAIT_AFTER_CHAT_MS ngay trong cửa sổ đó rồi mới đóng lại — để chính trình
-                  // duyệt Suno tự xử lý toàn bộ (kể cả phân tích warp cần cho các lệnh như
-                  // "Reverse"), không còn tự giả lập tool nào ở phía mình nữa.
-                  // Bấm Export → "Full Song" NGAY TRONG Studio thật (trong bước chat bên dưới) để ÉP
-                  // Suno lưu thật xuống server trước — AI chỉnh trong chat chỉ đổi trạng thái tạm thời
-                  // trong trình duyệt, CHƯA lưu. Sau khi đã lưu chắc chắn, bước Render qua Worker ở
-                  // dưới (đọc state mới nhất qua GET /api/studio/project) mới lấy đúng bản đã đảo chiều.
-                  return step('Gửi lệnh cho AI Studio', 'Đang mở Studio để gửi lệnh AI (đợi tới ' + Math.round(WAIT_AFTER_CHAT_MS / 1000) + 's)…', function () {
-                    return api.sunoStudioAgentStep({ studioUrl: studioUrl, message: FIXED_PROMPT, waitMs: WAIT_AFTER_CHAT_MS });
+                  // Xử lý + lưu thay đổi trong Studio giờ chạy NGAY TRÊN SERVER — app chỉ gửi
+                  // session + link Studio, không còn biết/giữ nội dung hay cách thực hiện nữa.
+                  return step('Gửi lệnh cho AI Studio', 'Đang xử lý trên server (gửi lệnh AI + lưu)…', function () {
+                    return api.sunoStudioAgentStep({ studioUrl: studioUrl, session: session });
                   }).catch(function (e) {
                     // Best-effort — không cần biết AI có thực hiện xong hay không
                     // (xem yêu cầu tính năng), nhưng vẫn ghi log rõ lỗi để biết.
@@ -5448,26 +5530,26 @@
           })
           .then(function () {
             logLine('——— HOÀN TẤT — clipId cuối cùng: ' + finalClipId + ' ———');
-            setStatus('⏳ Đang dọn dẹp thư viện Suno…', '');
             // Dọn TOÀN BỘ clip liên quan tới bài này (clip gốc upload, bản render/fade qua API,
-            // clip lạ trùng tên...) — CHỈ GIỮ LẠI bản "[Done] " + tên bài (clip Suno tự tạo khi
-            // bấm Export → Full Song ngay trong Studio). Best-effort: nếu lỗi hoặc chưa tìm thấy
-            // bản "[Done]", KHÔNG xoá gì cả và vẫn dùng bản render/fade hiện tại — không được
-            // phép làm hỏng hay mất kết quả đã có.
-            return api.sunoCleanupKeepDone({
-              session: session,
-              title: title,
-              alwaysTrashIds: [seedClipId, exportClipId, finalClipId].filter(Boolean)
-            }).then(function (res) {
-              if (res && res.doneClipId) {
-                finalClipId = res.doneClipId;
-                finalTitle = '[Done] ' + title;
-                logLine('Đã tìm thấy bản "[Done] ' + title + '" — dùng làm bản cuối cùng, đã dọn ' + (res.trashedCount || 0) + ' clip khác.');
-              } else {
-                logLine('⚠ Không tìm thấy bản "[Done] ' + title + '" — giữ nguyên bản render/fade hiện tại, không xoá gì.');
-              }
-            }).catch(function (e) {
-              logLine('⚠ Dọn dẹp thư viện lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));
+            // clip lạ trùng tên...) — CHỈ GIỮ LẠI bản "[Done] " + tên bài. Best-effort: nếu lỗi
+            // hoặc chưa tìm thấy bản "[Done]", KHÔNG xoá gì cả và vẫn dùng bản render/fade hiện
+            // tại — không được phép làm hỏng hay mất kết quả đã có.
+            return step('Dọn dẹp thư viện', 'Đang dọn dẹp thư viện Suno…', function () {
+              return api.sunoCleanupKeepDone({
+                session: session,
+                title: title,
+                alwaysTrashIds: [seedClipId, exportClipId, finalClipId].filter(Boolean)
+              }).then(function (res) {
+                if (res && res.doneClipId) {
+                  finalClipId = res.doneClipId;
+                  finalTitle = '[Done] ' + title;
+                  logLine('Đã tìm thấy bản "[Done] ' + title + '" — dùng làm bản cuối cùng, đã dọn ' + (res.trashedCount || 0) + ' clip khác.');
+                } else {
+                  logLine('⚠ Không tìm thấy bản "[Done] ' + title + '" — giữ nguyên bản render/fade hiện tại, không xoá gì.');
+                }
+              }).catch(function (e) {
+                logLine('⚠ Dọn dẹp thư viện lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));
+              });
             });
           })
           .then(function () {
@@ -5476,15 +5558,15 @@
             // nếu người dùng không kịp bấm lưu) — hiện popup để người dùng tự
             // chọn Download (mở popup Suno Download có sẵn, tự điền sẵn link)
             // hoặc Tiếp tục (chỉ đóng popup, không tải gì cả).
-            fadeOutPendingClipId = finalClipId;
-            fadeOutPendingTitle = finalTitle;
-            if (fadeOutDoneMsg) fadeOutDoneMsg.textContent = '✅ Hoàn tất! Bài "' + finalTitle + '" đã sẵn sàng.';
-            if (fadeOutDoneModal) fadeOutDoneModal.classList.remove('hidden');
+            reversePendingClipId = finalClipId;
+            reversePendingTitle = finalTitle;
+            showReverseDone('✅ Hoàn tất! Bài "' + finalTitle + '" đã sẵn sàng.');
           });
       }).catch(function (e) {
         var msg = cleanErrorMessage(e);
         logLine('✗ PIPELINE DỪNG LẠI: ' + msg);
         setStatus('✗ ' + msg, 'err');
+        hideReverseDoneModal();
       }).then(function () {
         running = false;
         btn.disabled = false;

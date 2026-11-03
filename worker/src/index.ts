@@ -60,6 +60,7 @@ import {
   studioExportStart,
   studioExportStatus,
   studioInspect,
+  studioAutomateReverse,
   trashClip,
   uploadFinish,
   uploadInit,
@@ -219,6 +220,10 @@ async function routeSuno(pathname: string, method: string, request: Request, env
   if (pathname === "/suno/studio/inspect" && method === "POST") {
     requireApp(ctx);
     return studioInspect(request, env);
+  }
+  if (pathname === "/suno/studio/automate-reverse" && method === "POST") {
+    requireApp(ctx);
+    return studioAutomateReverse(request, env);
   }
   if (pathname === "/suno/studio/export/start" && method === "POST") {
     requireApp(ctx);

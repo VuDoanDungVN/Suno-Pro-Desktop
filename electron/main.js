@@ -966,10 +966,13 @@ ipcMain.handle('debug-log', (event, line) => {
 });
 
 // Main-side equivalent (main process has no window.electronAPI).
-function debugLogMain(line) {
+// `atIso`: cho phép ghi lại đúng thời điểm THẬT đã xảy ra (vd log trả về từ Worker sau khi chạy
+// xong 1 bước tốn vài chục giây) thay vì luôn dùng "bây giờ" — nếu không có thì mặc định như cũ.
+function debugLogMain(line, atIso) {
   try {
     const file = path.join(app.getPath('userData'), 'debug.log');
-    fs.appendFileSync(file, `[${new Date().toISOString()}] ${String(line).slice(0, 500)}\r\n`);
+    const ts = atIso || new Date().toISOString();
+    fs.appendFileSync(file, `[${ts}] ${String(line).slice(0, 500)}\r\n`);
   } catch (e) { /* logging must never break the app */ }
 }
 
@@ -1406,319 +1409,29 @@ ipcMain.handle('suno-split-export', async (event, payload) => {
   throw new Error('Suno render quá lâu (>10 phút) — mở Studio kiểm tra trực tiếp.');
 });
 
-// ─── Gửi lệnh vào chat AI Studio bằng CHÍNH trình duyệt thật (ẩn) ────────────────────────
-// Lý do không gọi thẳng API /a/api/agent/step + tự giả lập tool nữa: nhiều tool (vd
-// "arrangements_edit: reverse") chỉ có tác dụng thật khi clip đã có "warp markers" — dữ
-// liệu này CHỈ được chính trình duyệt tự phân tích (Web Audio API) khi mở Studio thật, không
-// có API nào xin được hộ (đã xác minh: upload xong qua API thì warp.enabled luôn là false).
-// Giải pháp: mở 1 BrowserWindow ẩn, dùng LẠI session đăng nhập đã lưu (cùng partition
-// SUNO_CONNECT_PARTITION, nên đã có sẵn cookie, không cần đăng nhập lại), tự gõ lệnh vào ô
-// chat ("Magic Bar prompt") và bấm Send — y hệt người dùng thật — để Suno tự xử lý toàn bộ
-// (kể cả phân tích warp) rồi tự lưu. Selector DOM dò được qua Inspect Element thực tế.
-async function sunoStudioAutomateChat(studioUrl, message, waitAfterSendMs) {
-  return new Promise((resolve, reject) => {
-    // "show: false" (cửa sổ thường) khiến Chromium throttle/không mount kịp app React của Suno
-    // (timeout dò ô chat liên tục thất bại dù chờ đủ 60s) — vì khi KHÔNG hiển thị, trình duyệt
-    // tạm dừng cả vòng lặp requestAnimationFrame lẫn phần dựng hình (compositor), bất kể
-    // document.hidden báo gì, nên Studio (dùng canvas Three.js + rAF để khởi tạo) không chạy.
-    // Đặt toạ độ âm (-10000, -10000) + showInactive() từng dùng để lách việc này (Chromium coi
-    // là "đang hiển thị" dù ở ngoài màn hình) — nhưng macOS có thể tự kéo cửa sổ đặt hoàn toàn
-    // ngoài vùng nhìn thấy trở lại màn hình, khiến người dùng vẫn thấy cửa sổ Studio hiện ra.
-    // Giải pháp đúng: "offscreen rendering" (OSR) của Electron — cửa sổ render liên tục vào 1
-    // buffer riêng, KHÔNG BAO GIỜ cần hiển thị thật (show() không hề được gọi), nên không có gì
-    // để hệ điều hành "kéo ra" cả, đồng thời rAF/compositor vẫn chạy đầy đủ như cửa sổ thật vì
-    // OSR vẫn render liên tục — không bị throttle như "show: false" thường.
-    const win = new BrowserWindow({
-      width: 1280,
-      height: 900,
-      show: false,
-      frame: false,
-      skipTaskbar: true,
-      webPreferences: {
-        partition: SUNO_CONNECT_PARTITION,
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-        offscreen: true
-      }
-    });
-    // Không cần xem hình ảnh render ra — chỉ cần "tiêu thụ" sự kiện paint để Electron không tích
-    // tụ buffer vô ích (khuyến nghị chính thức khi dùng offscreen rendering không hiển thị ảnh).
-    win.webContents.on('paint', () => {});
-    // KHÔNG gọi show()/showInactive() — cửa sổ OSR không cần (và không nên) được hiển thị thật,
-    // nếu không sẽ mất tác dụng tránh bị hệ điều hành kéo ra màn hình.
-    let settled = false;
-    const finish = (err, result) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(overallTimeout);
-      if (!win.isDestroyed()) win.destroy();
-      if (err) reject(err); else resolve(result);
-    };
-    const overallTimeout = setTimeout(() => finish(new Error('Hết thời gian chờ Suno Studio xử lý lệnh (8 phút).')), 8 * 60 * 1000);
-
-    win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-      finish(new Error(`Studio tải trang thất bại: ${errorDescription} (${errorCode})`));
-    });
-
-    win.webContents.once('did-finish-load', async () => {
-      try {
-        // Ô chat chỉ xuất hiện SAU KHI app Studio (React) tải/khởi tạo xong — poll tới khi
-        // thấy, tối đa 60s (project càng dài/audio càng nặng càng lâu).
-        const deadline = Date.now() + 90000;
-        let found = false;
-        while (Date.now() < deadline) {
-          // Project tạo từ Studio bản cũ sẽ hiện hộp thoại chặn giữa màn hình, bắt bấm
-          // "Open in Studio 2.0" mới vào được — tự bấm hộ (so khớp CHÍNH XÁC chữ trên nút,
-          // tránh nhầm với nút "Open in Studio 1.2 Legacy" cũng chứa chữ "Open in Studio").
-          await win.webContents.executeJavaScript(`
-            (function () {
-              const btns = Array.from(document.querySelectorAll('button'));
-              const btn = btns.find((b) => (b.textContent || '').trim() === 'Open in Studio 2.0');
-              if (btn) btn.click();
-              return !!btn;
-            })();
-          `).catch(() => false);
-          found = await win.webContents.executeJavaScript(
-            `!!document.querySelector('textarea[aria-label="Magic Bar prompt"]')`
-          );
-          if (found) break;
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        if (!found) throw new Error('Không thấy ô chat của Suno Studio (giao diện có thể đã đổi).');
-
-        // Audio được vẽ bằng <canvas> (Three.js) — không có phần tử DOM riêng cho từng track
-        // nên không bấm thẳng vào "sóng nhạc" được. Phải chọn track qua phần tử DOM thường ở
-        // panel bên trái (".track-header-row"), rồi bấm nút "Add to prompt" để đính kèm track
-        // đó vào khung chat — thiếu bước này thì lệnh gửi đi không có audio nào kèm theo, AI
-        // không có gì để xử lý dù vẫn trả lời bình thường.
-        //
-        // Ô chat ("Magic Bar prompt") xuất hiện SỚM HƠN panel danh sách track (track panel có
-        // thể còn đang hydrate/phân tích audio) — nếu bấm chọn track ngay khi vừa thấy ô chat
-        // thì ".track-header-row" có thể CHƯA tồn tại, khiến bước đính kèm thất bại dù đợi lại
-        // vài lần (toàn bộ chỉ trong ~4s, không đủ cho panel kịp render). Giờ đợi RIÊNG cho
-        // ".track-header-row" xuất hiện trước (tối đa 30s), rồi mới sang bước đính kèm.
-        debugLogMain('[fadeout] Đã thấy ô chat, đang đợi panel track xuất hiện…');
-        const trackDeadline = Date.now() + 30000;
-        let hasTrackHeader = false;
-        while (Date.now() < trackDeadline) {
-          hasTrackHeader = await win.webContents.executeJavaScript(
-            `!!document.querySelector('.track-header-row')`
-          ).catch(() => false);
-          if (hasTrackHeader) break;
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        debugLogMain(`[fadeout] Panel track ${hasTrackHeader ? 'đã xuất hiện' : 'KHÔNG xuất hiện sau 30s'}.`);
-
-        // Class "track-header-selected" có vẻ có mặt mặc định ngay cả khi CHƯA thực sự chọn,
-        // nên không dựa vào nó để quyết định có click hay không — luôn bấm chọn trước, rồi xác
-        // minh bằng việc kiểm tra "chip" audio (nút "Remove <tên track>") có thực sự xuất hiện
-        // trong khung chat hay chưa, thử lại nhiều lần nếu chưa thấy thay vì tin mù vào 1 lần bấm.
-        // Log trước đó cho thấy "chọn track=có, bấm Add to prompt=có" ở MỌI lần thử nhưng chip
-        // vẫn không bao giờ xuất hiện — nghĩa là .click() tổng hợp (synthetic) có bắn ra event
-        // "click" nhưng component chọn track (dạng Base UI/Radix, thấy qua các thuộc tính
-        // data-button-id/data-mouseover-id) không thực sự coi đó là 1 cú click thật: những UI
-        // kiểu này thường lắng nghe "pointerdown" (bắt đầu kéo-chọn) chứ không chỉ "click" đơn
-        // thuần, nên track không hề được chọn dù hàm trả về true. Giờ mô phỏng đầy đủ chuỗi sự
-        // kiện chuột thật (pointerdown → mousedown → pointerup → mouseup → click) có toạ độ
-        // (clientX/clientY) tính từ getBoundingClientRect của chính phần tử, thay vì chỉ gọi
-        // .click().
-        const CLICK_HELPER = `
-          function __spClick(el, atX, atY) {
-            if (!el) return false;
-            const r = el.getBoundingClientRect();
-            const x = (typeof atX === 'number') ? atX : r.left + r.width / 2;
-            const y = (typeof atY === 'number') ? atY : r.top + r.height / 2;
-            const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 };
-            el.dispatchEvent(new PointerEvent('pointerdown', { ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
-            el.dispatchEvent(new MouseEvent('mousedown', base));
-            el.dispatchEvent(new PointerEvent('pointerup', { ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
-            el.dispatchEvent(new MouseEvent('mouseup', base));
-            el.dispatchEvent(new MouseEvent('click', base));
-            return true;
-          }
-        `;
-        // Click giữa canvas (theo chiều cao) KHÔNG trúng clip — ảnh người dùng chụp cho thấy
-        // clip ("vanmaihuong (1)") chỉ nằm ở 1 DẢI HẸP ngay sát trên cùng canvas (ngay dưới
-        // thước thời gian), còn phần lớn chiều cao canvas bên dưới là khoảng trống (chỗ dành
-        // cho các track khác nếu có). Click vào "giữa" canvas nên rơi vào khoảng trống đó, không
-        // phải vào clip. Toạ độ Y đúng của track lại trùng khớp với toạ độ Y của chính
-        // ".track-header-row" ở panel bên trái (2 bên luôn xếp hàng ngang nhau trong mọi DAW
-        // kiểu arrangement view) — nên lấy Y từ đó, còn X thì lấy 1 điểm nằm trong khoảng audio
-        // thật (30% chiều rộng canvas, tính từ mép trái) để chắc chắn trúng clip.
-        let addedToPrompt = false;
-        for (let attempt = 0; attempt < 8 && !addedToPrompt; attempt++) {
-          const canvasClicked = await win.webContents.executeJavaScript(`
-            (function () {
-              ${CLICK_HELPER}
-              const canvas = document.querySelector('[data-studio-main-canvas="true"] canvas');
-              const header = document.querySelector('.track-header-row');
-              if (!canvas || !header) return false;
-              const cRect = canvas.getBoundingClientRect();
-              const hRect = header.getBoundingClientRect();
-              const x = cRect.left + cRect.width * 0.3;
-              const y = hRect.top + hRect.height / 2;
-              return __spClick(canvas, x, y);
-            })();
-          `).catch(() => false);
-          await new Promise((r) => setTimeout(r, 400));
-          const addBtnClicked = await win.webContents.executeJavaScript(`
-            (function () {
-              ${CLICK_HELPER}
-              const btn = document.querySelector('button[aria-label="Add to prompt"]');
-              if (!btn || btn.disabled) return false;
-              return __spClick(btn);
-            })();
-          `).catch(() => false);
-          await new Promise((r) => setTimeout(r, 800));
-          addedToPrompt = await win.webContents.executeJavaScript(
-            `!!document.querySelector('button[aria-label^="Remove "]')`
-          ).catch(() => false);
-          debugLogMain(`[fadeout] …lần thử đính kèm ${attempt + 1}/8: click canvas=${canvasClicked ? 'có' : 'không'}, bấm Add to prompt=${addBtnClicked ? 'có' : 'không'}, đã thấy chip=${addedToPrompt ? 'có' : 'không'}`);
-        }
-        if (!addedToPrompt) throw new Error('Không đính kèm được audio vào khung chat (không thấy "chip" audio sau khi chọn track + bấm Add to prompt).');
-        await new Promise((r) => setTimeout(r, 500));
-
-        // Gõ 1 lệnh vào ô chat (qua native setter vì React không nhận .value gán trực tiếp),
-        // bấm Send, rồi theo dõi nút Send (bận → rảnh) để biết AI đã xử lý xong hay chưa, cắt
-        // cứng sau `pollMs` nếu chưa rõ. Dùng chung cho cả lệnh reverse chính VÀ lệnh nhắc lại
-        // "đừng cắt audio" gửi ngay sau đó trong CÙNG 1 phiên chat (không cần chọn lại track).
-        const sendAndWait = async (msg, pollMs, label) => {
-          const sentNow = await win.webContents.executeJavaScript(`
-            (function () {
-              const ta = document.querySelector('textarea[aria-label="Magic Bar prompt"]');
-              if (!ta) return false;
-              const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-              setter.call(ta, ${JSON.stringify(msg)});
-              ta.dispatchEvent(new Event('input', { bubbles: true }));
-              return true;
-            })();
-          `);
-          if (!sentNow) throw new Error(`Không gõ được lệnh vào ô chat (${label}).`);
-
-          await new Promise((r) => setTimeout(r, 400));
-          const clickedNow = await win.webContents.executeJavaScript(`
-            (function () {
-              const btn = document.querySelector('button[aria-label="Send"]');
-              if (!btn || btn.disabled) return false;
-              btn.click();
-              return true;
-            })();
-          `);
-          if (!clickedNow) throw new Error(`Nút Gửi không bật lên được (${label}) — có thể ô chat đang bị khoá/đã có lệnh khác đang chạy.`);
-
-          debugLogMain(`[fadeout] Đã bấm Gửi (${label}), đang theo dõi trạng thái AI Studio…`);
-          // Toast "Song Saved!" KHÔNG tự hiện (chỉ hiện khi bấm Export → Full Song thủ công —
-          // đã xác nhận với người dùng), nên không dùng làm tín hiệu ở đây. Dựa vào trạng thái
-          // disabled của nút Gửi: bận → rảnh. Theo yêu cầu người dùng: cắt cứng sau `pollMs`
-          // dù AI đã xử lý xong hay chưa, để không treo vô thời hạn nếu giao diện đổi khác.
-          let sawBusyNow = false;
-          let settledNow = false;
-          let nullStreakNow = 0;
-          const deadlineNow = Date.now() + pollMs;
-          let lastLogAtNow = 0;
-          while (Date.now() < deadlineNow) {
-            const busy = await win.webContents.executeJavaScript(`
-              (function () {
-                const btn = document.querySelector('button[aria-label="Send"]');
-                return btn ? !!btn.disabled : null;
-              })();
-            `).catch(() => null);
-            if (busy === true) { sawBusyNow = true; nullStreakNow = 0; }
-            else if (busy === false) { nullStreakNow = 0; if (sawBusyNow) { settledNow = true; break; } }
-            else if (busy === null && sawBusyNow) {
-              nullStreakNow++;
-              if (nullStreakNow >= 5) { settledNow = true; break; } // ~10s mất dấu nút sau khi đã bận — coi như xong
-            }
-            if (Date.now() - lastLogAtNow > 10000) {
-              lastLogAtNow = Date.now();
-              debugLogMain(`[fadeout] …(${label}) vẫn đang theo dõi AI Studio (đã thấy bận: ${sawBusyNow ? 'có' : 'chưa'}, trạng thái nút hiện tại: ${busy === null ? 'không tìm thấy' : busy ? 'bận' : 'rảnh'})`);
-            }
-            await new Promise((r) => setTimeout(r, 2000));
-          }
-          if (settledNow) {
-            debugLogMain(`[fadeout] (${label}) Nút Gửi đã bật lại (hoặc mất dấu sau khi bận) — coi như AI Studio đã xử lý xong.`);
-          } else {
-            debugLogMain(`[fadeout] (${label}) Hết ${Math.round(pollMs / 1000)}s theo yêu cầu — tiếp tục dù chưa chắc AI đã xử lý xong.`);
-          }
-          return settledNow;
-        };
-
-        const settledByPoll1 = await sendAndWait(message, 15000, 'lệnh 1/2 — reverse');
-        // Lệnh nhắc lại thứ 2, gửi ngay sau khi lệnh 1 đã "ổn định" (hoặc hết 30s) — theo yêu
-        // cầu người dùng, để nhắc AI không được cắt/split audio sau khi đã reverse.
-        const FOLLOWUP_PROMPT = 'Đảm bảo audio phải đủ thời lượng không bị cắt (no split), đặc biệt phải so sánh audio upload và audio sau khi xử lý Reverse phải có thời lượng bằng nhau.';
-        const settledByPoll2 = await sendAndWait(FOLLOWUP_PROMPT, 10000, 'lệnh 2/2 — nhắc không cắt');
-        const settledByPoll = settledByPoll1 && settledByPoll2;
-        const settledBySavedToast = false;
-
-        // QUAN TRỌNG: thay đổi của AI trong chat chỉ cập nhật trạng thái hiển thị TẠM THỜI
-        // trong chính trình duyệt — CHƯA được lưu xuống server. Bước Render phía sau (Worker)
-        // đọc lại state qua GET /api/studio/project/{id}, nên nếu chưa lưu thì nó vẫn đọc phải
-        // bản GỐC chưa đảo chiều, dù trình duyệt đang hiển thị/phát đúng bản đã đảo chiều. Lưu
-        // CHỈ xảy ra khi bấm Export → "Full Song" (lúc đó mới hiện toast "Song Saved!") — đây
-        // là bước bắt buộc để Render sau đó lấy đúng dữ liệu, không phải bước chờ cho có.
-        debugLogMain('[fadeout] Đang lưu project (bấm Export → Full Song) — bước bắt buộc để Render lấy đúng bản đã đảo chiều…');
-        const exportMenuOpened = await win.webContents.executeJavaScript(`
-          (function () {
-            ${CLICK_HELPER}
-            const btn = document.querySelector('button[aria-label="Export menu"]');
-            return __spClick(btn);
-          })();
-        `).catch(() => false);
-        await new Promise((r) => setTimeout(r, 500));
-        const fullSongClicked = await win.webContents.executeJavaScript(`
-          (function () {
-            ${CLICK_HELPER}
-            const items = Array.from(document.querySelectorAll('.context-menu-item button'));
-            const btn = items.find((b) => (b.textContent || '').trim() === 'Full Song');
-            return __spClick(btn);
-          })();
-        `).catch(() => false);
-        debugLogMain(`[fadeout] …mở menu Export=${exportMenuOpened ? 'có' : 'không'}, bấm "Full Song"=${fullSongClicked ? 'có' : 'không'}`);
-        if (!exportMenuOpened || !fullSongClicked) {
-          throw new Error('Không bấm được Export → Full Song để lưu project (giao diện có thể đã đổi).');
-        }
-        const saveDeadline = Date.now() + 90000;
-        let savedToastSeen = false;
-        while (Date.now() < saveDeadline) {
-          savedToastSeen = await win.webContents.executeJavaScript(
-            `document.body.innerText.includes('Song Saved!')`
-          ).catch(() => false);
-          if (savedToastSeen) break;
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        if (!savedToastSeen) throw new Error('Đã bấm Export → Full Song nhưng không thấy toast "Song Saved!" xác nhận đã lưu (quá 90s).');
-        debugLogMain('[fadeout] Đã thấy toast "Song Saved!" — project đã lưu xong, đợi thêm 2s cho chắc…');
-        await new Promise((r) => setTimeout(r, 2000));
-
-        // Đã thử bấm thêm "Go to Song" để tự lấy clipId của bài đã render, nhưng URL lấy được
-        // hoá ra vẫn chỉ là projectId (không phải clip ID thật — gọi Fade Out bị 404), có lẽ do
-        // "Go to Song" mở ra chỗ khác mà cửa sổ ẩn này không theo dõi được. Bỏ bước đó — giờ chỉ
-        // cần ĐÃ LƯU CHẮC CHẮN (toast "Song Saved!" ở trên) là đủ, để bước Render qua Worker
-        // (vốn chỉ đọc lại state mới nhất qua GET /api/studio/project — không có lỗi logic, chỉ
-        // từng đọc phải bản CHƯA lưu) lấy đúng bản đã đảo chiều như bình thường.
-
-        finish(null, { ok: true, settledByPoll, settledBySavedToast });
-      } catch (e) {
-        finish(e);
-      }
-    });
-
-    win.loadURL(studioUrl);
-  });
-}
-
-// Gửi 1 lệnh cố định vào ô chat AI của Studio bằng trình duyệt ẩn thật (xem
-// sunoStudioAutomateChat) — dùng cho nút "Fade Out" ở mục "Upload nguyên bài". Đợi cố định
-// theo `waitMs` ngay trong trình duyệt ẩn trước khi đóng lại, để Suno có đủ thời gian chạy
-// xong toàn bộ vòng lặp AI + tự lưu trước khi app tiếp tục sang bước Render.
+// ─── Xử lý + lưu thay đổi trong Studio — giờ chạy NGAY TRÊN WORKER (Cloudflare Browser
+// Rendering), không còn mở BrowserWindow nào trên máy người dùng nữa. Toàn bộ kỹ thuật thực hiện
+// đã chuyển sang phía server — handler này chỉ còn là lớp gọi mỏng: gửi session + link Studio,
+// nhận kết quả + log về ghi lại debug.log như cũ (dồn 1 lần khi xong, không streaming realtime
+// được vì server chạy xong mới trả lời).
 ipcMain.handle('suno-studio-agent-step', async (event, payload) => {
   requireSunoProLicense();
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
-  const { studioUrl, message, waitMs } = payload;
-  if (!studioUrl || !message) throw new Error('Thiếu link Studio hoặc nội dung lệnh.');
-  return sunoStudioAutomateChat(studioUrl, message, Number.isFinite(waitMs) && waitMs > 0 ? waitMs : 60000);
+  const { studioUrl, session } = payload;
+  if (!studioUrl) throw new Error('Thiếu link Studio.');
+  const { token, cookieHeader, deviceId } = await sunoResolveToken(session);
+  const res = await callSunoProWorker('/suno/studio/automate-reverse', { token, cookieHeader, deviceId, studioUrl });
+  // Worker trả `logs` kèm `ts` (thời điểm THẬT từng dòng xảy ra trên server) — ghi lại đúng mốc
+  // đó thay vì giờ hiện tại, để debug.log phản ánh đúng diễn biến từng bước (không bị dồn cục
+  // vào 1 thời điểm do cả quá trình chỉ trả kết quả về 1 lần duy nhất khi xong).
+  if (Array.isArray(res && res.logs)) {
+    for (const entry of res.logs) {
+      const line = typeof entry === 'string' ? entry : (entry && entry.line) || '';
+      const atIso = entry && typeof entry.ts === 'number' ? new Date(entry.ts).toISOString() : null;
+      debugLogMain(`[reverse] ${line}`, atIso);
+    }
+  }
+  return { ok: true, settledByPoll: !!(res && res.settledByPoll) };
 });
 
 // Áp Fade Out cho 1 bài đã hoàn chỉnh (POST /a/api/edit/fade/{clipId}/ qua Worker), rồi tự poll
@@ -1763,9 +1476,9 @@ ipcMain.handle('suno-trash-clip', async (event, payload) => {
   return callSunoProWorker('/suno/trash-clip', { token, cookieHeader, deviceId, ids: payload.ids });
 });
 
-// Dọn TOÀN BỘ clip liên quan tới bài vừa xử lý trong pipeline Fade Out, CHỈ GIỮ LẠI bản
-// "[Done] " + tên bài (clip Suno tự tạo khi bấm Export → Full Song trong Studio) — xem
-// /suno/cleanup-keep-done ở worker. Trả về doneClipId để pipeline dùng làm bản tải về cuối cùng.
+// Dọn TOÀN BỘ clip liên quan tới bài vừa xử lý trong pipeline Reverse, CHỈ GIỮ LẠI bản
+// "[Done] " + tên bài — xem /suno/cleanup-keep-done ở worker. Trả về doneClipId để pipeline
+// dùng làm bản tải về cuối cùng.
 ipcMain.handle('suno-cleanup-keep-done', async (event, payload) => {
   if (!payload || !payload.session || !payload.title) throw new Error('Thiếu session hoặc title.');
   const { token, cookieHeader, deviceId } = await sunoResolveToken(payload.session);

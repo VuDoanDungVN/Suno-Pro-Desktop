@@ -1,5 +1,9 @@
 interface Env {
   DB: D1Database;
+  // Browser Rendering — tự động hoá Suno Studio (gửi lệnh AI, Export → Full Song) ngay trên
+  // server bằng @cloudflare/puppeteer, thay vì mở cửa sổ trên máy người dùng (xem
+  // src/suno-studio-automation.ts).
+  BROWSER: Fetcher;
   // Key "chủ" dự phòng (bypass toàn bộ license), tuỳ chọn — để trống nếu không cần.
   API_TOKEN?: string;
   // Khoá dùng mã hoá KEY gốc lưu trong D1 (key_enc) — chỉ Worker đọc lại được.

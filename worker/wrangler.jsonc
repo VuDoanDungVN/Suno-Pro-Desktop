@@ -3,6 +3,8 @@
   "name": "suno-pro-worker",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-24",
+  // Bắt buộc cho @cloudflare/puppeteer (dùng node:buffer nội bộ) — thiếu cờ này sẽ lỗi runtime.
+  "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   // Tạo bằng: wrangler d1 create suno-pro-db  (rồi dán database_id thật vào đây)
   "d1_databases": [
@@ -12,5 +14,9 @@
       "database_id": "d04a65e1-c40a-44a1-8495-99528b9f57b7",
       "migrations_dir": "./migrations"
     }
-  ]
+  ],
+  // Browser Rendering — dùng cho tự động hoá Suno Studio (gửi lệnh AI, Export → Full Song)
+  // ngay trên server thay vì mở cửa sổ trên máy người dùng. Yêu cầu Workers Paid (xem
+  // https://developers.cloudflare.com/browser-rendering/platform/limits/).
+  "browser": { "binding": "BROWSER" }
 }

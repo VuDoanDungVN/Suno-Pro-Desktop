@@ -22,6 +22,7 @@ import {
   browser_token as wasmBrowserToken,
   classify_upload_status as wasmClassifyUploadStatus,
 } from "./suno-wasm/suno_wasm.js";
+import { runStudioReverseAutomation } from "./suno-studio-automation";
 
 const SUNO_API = "https://studio-api.prod.suno.com";
 const SUNO_STUDIO_HOSTS = ["https://studio-api.prod.suno.com", "https://studio-api-prod.suno.com"];
@@ -624,6 +625,29 @@ export async function studioInspect(request: Request, _env: Env): Promise<Respon
   return json({ title: proj.title || "", latestVersion: proj.latest_version_id || "", timing: state.timing || null, tracks });
 }
 
+/** `POST /suno/studio/automate-reverse { studioUrl }` — chạy TOÀN BỘ bước gửi lệnh AI Studio
+ * (reverse + nhắc không cắt — nội dung nằm hẳn trong suno-studio-automation.ts, KHÔNG nhận từ
+ * client) rồi Export → Full Song NGAY TRÊN SERVER bằng Cloudflare Browser Rendering. Trả thêm
+ * `logs` để app ghi lại debug.log y như trước (không stream realtime được vì đây là 1 request
+ * chờ tới khi xong). */
+export async function studioAutomateReverse(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<Record<string, unknown> & { studioUrl?: unknown }>(request);
+  const session = readSession(body);
+  const studioUrl = cleanText(body.studioUrl, 500);
+  if (!studioUrl) throw new HttpError(400, "missing_fields", "Thiếu studioUrl.");
+  if (!session.cookieHeader) throw new HttpError(400, "missing_cookie", "Thiếu cookie phiên Suno — kết nối lại Suno Connect.");
+  // Kèm `ts` (thời điểm THẬT, ms epoch) cho mỗi dòng — vì cả quá trình chỉ trả kết quả về app
+  // 1 LẦN DUY NHẤT khi xong (không stream realtime được), nếu không có mốc thời gian thật thì
+  // app ghi lại debug.log sẽ bị dồn hết vào đúng 1 thời điểm, không phản ánh đúng diễn biến.
+  const logs: Array<{ ts: number; line: string }> = [];
+  const result = await runStudioReverseAutomation(
+    env,
+    { cookieHeader: session.cookieHeader, studioUrl },
+    (line) => logs.push({ ts: Date.now(), line }),
+  );
+  return json({ ...result, logs });
+}
+
 /** `POST /suno/studio/export/start { projectId, title? }` → { renderId }. */
 export async function studioExportStart(request: Request, _env: Env): Promise<Response> {
   const body = await readJson<Record<string, unknown>>(request);
@@ -892,7 +916,7 @@ async function listAllClipsByTitleFilter(session: SunoSession, userId: string, t
 }
 
 /** `POST /suno/cleanup-keep-done { title, alwaysTrashIds?, maxAgeMs? }` — dọn TOÀN BỘ clip liên
- * quan tới bài vừa xử lý trong pipeline Fade Out (title trùng khớp hoặc chứa đúng tên bài, mới
+ * quan tới bài vừa xử lý trong pipeline Reverse (title trùng khớp hoặc chứa đúng tên bài, mới
  * tạo trong `maxAgeMs` gần nhất, mặc định 15 phút), CHỈ GIỮ LẠI bản có tiền tố đúng dạng
  * "[Done] " + tên bài — tức clip Suno TỰ TẠO khi bấm Export → "Full Song" ngay trong Studio (đã
  * xác nhận qua test thực tế: hành động này không chỉ lưu, mà còn tự render ra 1 clip riêng dùng
