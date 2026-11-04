@@ -562,7 +562,8 @@ ipcMain.handle('trial-start', () => {
 // hoạt" cũ (ký offline, xem dist/assets/main-9QM-JpB-.js) không còn đủ để dùng
 // được các chức năng chính, vì "cách làm" (payload Studio state, EQ mặc định,
 // endpoint chính xác…) không còn nằm trong app phát hành cho khách nữa.
-const SUNOPRO_WORKER_API = 'https://suno-pro-worker.vudungit92.workers.dev';
+// TẠM trỏ sang worker staging để test — nhớ đổi lại trước khi build bản phát hành cho khách.
+const SUNOPRO_WORKER_API = 'https://suno-pro-worker-staging.vudungit92.workers.dev';
 
 function sunoProDeviceIdFile() {
   return path.join(app.getPath('userData'), 'sunopro-device-id.json');

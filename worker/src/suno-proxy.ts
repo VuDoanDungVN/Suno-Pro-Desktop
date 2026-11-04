@@ -144,9 +144,10 @@ async function sunoStudioFetch(
   const payload = body !== undefined ? JSON.stringify(body) : undefined;
   if (payload !== undefined) headers["Content-Type"] = "application/json";
   let lastErr = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) await sleep(600 * attempt);
+  const MAX_ATTEMPTS = 8;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let sawRateLimit = false;
+    let nextWaitMs = 600 * (attempt + 1);
     for (const host of SUNO_STUDIO_HOSTS) {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -167,6 +168,10 @@ async function sunoStudioFetch(
           if (res.status === 429) {
             lastErr = host + " 429";
             sawRateLimit = true;
+            // Ưu tiên chờ đúng khoảng Retry-After thật Suno yêu cầu (như luồng upload), thay vì
+            // chỉ đoán cố định — tăng cơ hội thành công lại ở lần thử kế tiếp.
+            const retryAfterMs = parseRetryAfterMs(res);
+            if (retryAfterMs !== null) nextWaitMs = Math.min(Math.max(retryAfterMs, 300), 8000);
             continue;
           }
           throw new HttpError(502, "suno_error", "Suno Studio API HTTP " + res.status + " " + JSON.stringify(data).slice(0, 220));
@@ -179,6 +184,7 @@ async function sunoStudioFetch(
       }
     }
     if (!sawRateLimit) break; // lỗi khác 429 (404/network/...) — thử lại cũng vô ích, dừng ngay
+    if (attempt < MAX_ATTEMPTS - 1) await sleep(nextWaitMs);
   }
   throw new HttpError(502, "suno_error", "Không gọi được Suno Studio API (" + lastErr + ").");
 }
