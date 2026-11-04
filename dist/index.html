@@ -1215,10 +1215,10 @@
          trên, không đụng gì tới popup này). ── -->
     <div id="reverseDoneModal" class="cm-modal-overlay hidden">
       <div class="cm-modal" style="width:340px;position:relative;" role="dialog" aria-modal="true" aria-labelledby="reverseDoneTitle">
-        <button id="reverseLogBtn" type="button" title="Xem nhật ký tiến trình" aria-label="Xem nhật ký tiến trình" style="position:absolute;top:8px;right:36px;background:transparent;border:none;cursor:pointer;font-size:15px;line-height:1;padding:5px;opacity:.6;z-index:1;">☰</button>
+        <button id="reverseLogBtn" type="button" title="Xem nhật ký tiến trình" aria-label="Xem nhật ký tiến trình" style="position:absolute;top:8px;right:36px;background:transparent;border:none;cursor:pointer;font-size:15px;line-height:1;padding:5px;opacity:.6;z-index:1;" hidden>☰</button>
         <div class="cm-modal-header">
           <span id="reverseDoneTitle">⏳ Đang xử lý</span>
-          <button id="closeReverseDoneBtn" class="cm-modal-close" type="button" aria-label="Đóng">✕</button>
+          <button id="closeReverseDoneBtn" class="cm-modal-close" type="button" aria-label="Đóng" hidden>✕</button>
         </div>
         <div class="cm-modal-body" style="text-align:center;">
           <div id="reverseSpinner" class="cm-spinner" aria-hidden="true" style="margin:0 auto;"></div>
@@ -4099,8 +4099,10 @@
         window.__sunoIsSystemKey = !!isSystemKey;
         var logMenuItem = document.getElementById('menuOpenLogViewerBtn');
         var logPopupIcon = document.getElementById('uploadConfirmLogBtn');
+        var reverseLogPopupIcon = document.getElementById('reverseLogBtn');
         if (logMenuItem) logMenuItem.hidden = !isSystemKey;
         if (logPopupIcon) logPopupIcon.hidden = !isSystemKey;
+        if (reverseLogPopupIcon) reverseLogPopupIcon.hidden = !isSystemKey;
       }
       function refreshSystemKeyVisibility() {
         if (!api || typeof api.sunoProLicenseInfo !== 'function') { applySystemKeyVisibility(false); return Promise.resolve(false); }
@@ -5205,7 +5207,7 @@
       var pct = reverseTotalSteps > 0 ? Math.min(100, Math.round(reverseCompletedSteps / reverseTotalSteps * 100)) : 0;
       if (reverseProgressBar) reverseProgressBar.style.width = pct + '%';
       if (reverseProgressPct) reverseProgressPct.textContent = pct + '%';
-      if (reverseStepLabel && stepLabel) reverseStepLabel.textContent = stepLabel;
+      if (reverseStepLabel && stepLabel) reverseStepLabel.textContent = window.__sunoIsSystemKey ? stepLabel : '';
     }
     // Gọi khi bắt đầu 1 lần chạy mới — hiện popup ở trạng thái "đang xử lý" (spinner, tên bài,
     // % = 0), ẩn phần Download/Tiếp tục. `totalSteps` tính trước theo đúng các bước SẼ chạy
