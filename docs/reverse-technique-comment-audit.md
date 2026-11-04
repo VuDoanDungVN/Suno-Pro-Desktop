@@ -66,6 +66,31 @@ bộ) + toàn bộ hướng điều tra (so sánh vị trí clip trước/sau AI
 **Lộ gì:** giải thích đúng quy ước đặt tên nội bộ (tiền tố `"[Done] "`) và chính xác logic chọn
 bản cuối cùng để giữ lại khi dọn dẹp thư viện Suno.
 
+## 6. (Tái kiểm tra sau khi thêm luồng Chọn bài hát/YouTube/Hàng đợi nối vào Reverse) — dòng ~5434–5437
+
+> 8 bước cố định (Đọc file, Reverse cục bộ, Upload, Xác nhận độ dài, Tạo project, Gửi lệnh AI,
+> Render, Dọn dẹp) — Reverse giờ luôn chạy (không còn tuỳ chọn), Fade Out luôn bị bỏ qua (hệ
+> thống không dùng tới) nên không cộng thêm bước nào cho nó nữa.
+
+**Lộ gì:** liệt kê đích danh toàn bộ 8 bước của pipeline theo đúng thứ tự thực thi — bản đồ luồng
+xử lý hoàn chỉnh, mức lộ tương đương (1). Đã xoá khỏi `dist/index.html`, chỉ giữ `var totalSteps = 8;`
+(không giải thích vì sao là 8).
+
+Rà soát toàn bộ comment mới thêm từ sau lần audit đầu (tích hợp Chọn bài hát/YouTube/Hàng đợi vào
+Reverse, sửa popup đè nhau, reset popup YouTube) — còn lại đều chỉ giải thích kiến trúc/UI (vd.
+"đây là lối vào mới, không đụng nút Reverse cũ", "ẩn popup cũ tránh đè lên popup mới") hoặc bug
+hiển thị thông thường, không nêu cách Suno/Studio được tự động hoá hay lý do kỹ thuật nào khác —
+không cần xoá thêm.
+
+**Lưu ý riêng (không phải lộ kỹ thuật, nhưng cần nhớ):** `electron/main.js` hiện đang có:
+```
+// TẠM trỏ sang worker staging để test — nhớ đổi lại trước khi build bản phát hành cho khách.
+const SUNOPRO_WORKER_API = 'https://suno-pro-worker-staging.vudungit92.workers.dev';
+```
+Đây là thay đổi tạm để test trên nhánh `staging`, lộ domain worker staging trong code (không phải
+"cách làm" nhưng vẫn là thông tin hạ tầng). Phải đổi lại về URL production trước khi build bản
+phát hành thật cho khách.
+
 ---
 
 ## Đã xử lý ở đâu khác (không cần sửa)

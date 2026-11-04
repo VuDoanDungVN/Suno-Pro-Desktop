@@ -5431,9 +5431,6 @@
         var session, title, duration, projectId, seedClipId, exportClipId, exportDuration, finalClipId, finalTitle;
         title = fileBaseName(filePath);
         logLine('——— Bắt đầu pipeline Reverse cho file: ' + filePath + ' ———');
-        // 8 bước cố định (Đọc file, Reverse cục bộ, Upload, Xác nhận độ dài, Tạo project, Gửi
-        // lệnh AI, Render, Dọn dẹp) — Reverse giờ luôn chạy (không còn tuỳ chọn), Fade Out luôn
-        // bị bỏ qua (hệ thống không dùng tới) nên không cộng thêm bước nào cho nó nữa.
         var totalSteps = 8;
         showReverseRunning(title, totalSteps);
 
