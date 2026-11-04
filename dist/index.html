@@ -5314,23 +5314,13 @@
       });
     }
 
-    // Đảo ngược (reverse) audio NGAY TRÊN MÁY, chính xác tuyệt đối theo từng mẫu âm thanh,
-    // trước khi upload lên Suno — tách biệt hoàn toàn khỏi mọi bước phía sau (không đụng
-    // tới logic Studio/AI/render/Fade Out hiện có). Chỉ đổi "bytes" + "filename" dùng ở
-    // bước Upload khi người dùng bật tuỳ chọn này.
-    // Mã hoá lại thành MP3 (không phải WAV) — đã xác nhận qua test thực tế: upload WAV khiến
-    // Suno Studio render bị mất ~1 phút đầu (bug phía Suno khi xử lý nguồn WAV), còn MP3 thì
-    // không — nên dùng lamejs (thư viện JS thuần, không cần mạng, nạp qua assets/lamejs.iife.js)
-    // mã hoá PCM đã đảo ngược thành MP3 thay vì tự ghi header WAV như trước.
     function encodeReversedMp3(audioBuffer) {
-      var numChannels = Math.min(2, audioBuffer.numberOfChannels); // lamejs chỉ hỗ trợ mono/stereo
+      var numChannels = Math.min(2, audioBuffer.numberOfChannels);
       var sampleRate = audioBuffer.sampleRate;
       var numFrames = audioBuffer.length;
       var channelData = [];
       for (var ch = 0; ch < numChannels; ch++) channelData.push(audioBuffer.getChannelData(ch));
 
-      // Đảo ngược thứ tự mẫu + chuyển sang Int16 PCM (y hệt logic reverse cũ, chỉ khác định
-      // dạng đích: Int16Array cho lame thay vì ghi thẳng vào buffer WAV).
       var reversed = [];
       for (var c = 0; c < numChannels; c++) {
         var out = new Int16Array(numFrames);
@@ -5430,19 +5420,10 @@
             if (!up || !up.clipId) throw new Error('Suno không trả về clip ID sau khi upload.');
             seedClipId = up.clipId;
             logLine('clipId sau upload: ' + up.clipId);
-            // Độ dài đọc từ thẻ <audio> trên máy (readDuration ở bước đầu) có thể sai lệch
-            // (có khi gần một nửa) với vài kiểu MP3 VBR thiếu header seek chuẩn. Nếu dùng số
-            // sai này để đặt timeline Studio, bài sẽ bị render cụt mất phần sau. Xác nhận lại
-            // bằng đúng độ dài Suno tự đo được (metadata.duration) trước khi tạo project —
-            // best-effort: nếu Suno chưa trả kịp trong thời gian chờ, dùng tạm số đọc trên máy,
-            // không chặn hẳn pipeline.
             return step('Xác nhận độ dài thật từ Suno', 'Đang xác nhận độ dài thật của bài từ Suno…', function () {
               return api.sunoClipDuration({ session: session, clipId: up.clipId }).then(function (res) {
                 var real = res && res.durationSec;
                 if (typeof real === 'number' && real > 0) {
-                  if (Math.abs(real - duration) > 1) {
-                    logLine('⚠ Độ dài đọc trên máy (' + duration.toFixed(2) + 's) khác với Suno đo được (' + real.toFixed(2) + 's) — dùng số của Suno để tránh render bị cụt.');
-                  }
                   duration = real;
                 }
               }).catch(function (e) {
@@ -5466,16 +5447,11 @@
                 var studioUrl = asm && asm.studioUrl;
                 logLine('projectId: ' + projectId + (studioUrl ? ' (' + studioUrl + ')' : ''));
                 if (!studioUrl) throw new Error('Không có link Studio để xử lý.');
-                // Chẩn đoán (chỉ đọc, không đổi gì): log lại chính xác vị trí clip trên timeline
-                // ngay sau khi ghép xong — để so với lúc sau render, xác định bug cắt mất đoạn
-                // đầu (khi Reverse cục bộ bật) xảy ra ở bước nào.
                 return api.sunoSplitInspect({ session: session, projectId: projectId }).then(function (insp) {
                   logLine('🔎 Sau ghép — tracks: ' + JSON.stringify((insp && insp.tracks) || []).slice(0, 900));
                 }).catch(function (e) {
                   logLine('⚠ Inspect sau ghép lỗi (bỏ qua, chỉ để chẩn đoán): ' + cleanErrorMessage(e));
                 }).then(function () {
-                  // Xử lý + lưu thay đổi trong Studio giờ chạy NGAY TRÊN SERVER — app chỉ gửi
-                  // session + link Studio, không còn biết/giữ nội dung hay cách thực hiện nữa.
                   return step('Gửi lệnh cho AI Studio', 'Đang xử lý trên server (gửi lệnh AI + lưu)…', function () {
                     return api.sunoStudioAgentStep({ studioUrl: studioUrl, session: session });
                   }).catch(function (e) {
@@ -5486,9 +5462,6 @@
                 });
               })
               .then(function () {
-                // Chẩn đoán lần 2: log lại vị trí clip NGAY TRƯỚC KHI render (sau khi AI/Export
-                // đã lưu) — nếu khác với lần log ở trên, nghĩa là bước AI/Export đã làm lệch vị
-                // trí clip; nếu giống hệt, nghĩa là lỗi nằm ở chính bước render/encode phía Suno.
                 return api.sunoSplitInspect({ session: session, projectId: projectId }).then(function (insp) {
                   logLine('🔎 Trước render — tracks: ' + JSON.stringify((insp && insp.tracks) || []).slice(0, 900));
                 }).catch(function (e) {
@@ -5508,13 +5481,10 @@
               });
           })
           .then(function () {
-            // Tuỳ chọn "Bỏ qua Fade Out": dừng ngay ở đây, dùng thẳng bản vừa render (đã gồm
-            // reverse) làm bản cuối cùng — không gọi bước Fade Out nữa. Mặc định (bỏ chọn) vẫn
-            // chạy đủ pipeline như trước, không đổi hành vi cũ.
             if (skipFadeEl && skipFadeEl.checked) {
               finalClipId = exportClipId;
               finalTitle = title;
-              logLine('Bỏ qua Fade Out theo yêu cầu — dùng thẳng bản vừa render (đã gồm reverse).');
+              logLine('Đã có bản render, chuyển sang bước dọn dẹp.');
               return;
             }
             var fadeAt = (typeof exportDuration === 'number' && exportDuration > FADE_SECONDS) ? (exportDuration - FADE_SECONDS) : 0;
@@ -5530,10 +5500,6 @@
           })
           .then(function () {
             logLine('——— HOÀN TẤT — clipId cuối cùng: ' + finalClipId + ' ———');
-            // Dọn TOÀN BỘ clip liên quan tới bài này (clip gốc upload, bản render/fade qua API,
-            // clip lạ trùng tên...) — CHỈ GIỮ LẠI bản "[Done] " + tên bài. Best-effort: nếu lỗi
-            // hoặc chưa tìm thấy bản "[Done]", KHÔNG xoá gì cả và vẫn dùng bản render/fade hiện
-            // tại — không được phép làm hỏng hay mất kết quả đã có.
             return step('Dọn dẹp thư viện', 'Đang dọn dẹp thư viện Suno…', function () {
               return api.sunoCleanupKeepDone({
                 session: session,
