@@ -18,5 +18,23 @@
   // Browser Rendering — dùng cho tự động hoá Suno Studio (gửi lệnh AI, Export → Full Song)
   // ngay trên server thay vì mở cửa sổ trên máy người dùng. Yêu cầu Workers Paid (xem
   // https://developers.cloudflare.com/browser-rendering/platform/limits/).
-  "browser": { "binding": "BROWSER" }
+  "browser": { "binding": "BROWSER" },
+
+  // Môi trường thử nghiệm — deploy: npx wrangler deploy --env staging
+  // Worker riêng (suno-pro-worker-staging) + D1 riêng (suno-pro-db-staging), không đụng tới
+  // dữ liệu/khách hàng thật của production.
+  "env": {
+    "staging": {
+      "name": "suno-pro-worker-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "suno-pro-db-staging",
+          "database_id": "d23bca55-bfc2-4ce4-a62b-f579dc37991b",
+          "migrations_dir": "./migrations"
+        }
+      ],
+      "browser": { "binding": "BROWSER" }
+    }
+  }
 }
