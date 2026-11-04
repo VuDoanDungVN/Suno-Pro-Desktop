@@ -3457,7 +3457,10 @@
         if (importModeMultiBtn) importModeMultiBtn.className = multi ? 'suno-connect-btn' : 'suno-test-btn suno-btn-ghost';
       }
       if (importModeSingleBtn) importModeSingleBtn.addEventListener('click', function () { setImportMode(false); });
-      if (importModeMultiBtn) importModeMultiBtn.addEventListener('click', function () { setImportMode(true); });
+      if (importModeMultiBtn) importModeMultiBtn.addEventListener('click', function () {
+        if (!window.__sunoIsSystemKey) return;
+        setImportMode(true);
+      });
 
       if (importModal) {
         if (closeImportModalBtn) closeImportModalBtn.addEventListener('click', function () { importModal.classList.add('hidden'); });
@@ -3473,6 +3476,7 @@
       }
       if (importMultiBtn) {
         importMultiBtn.addEventListener('click', function () {
+          if (!window.__sunoIsSystemKey) return;
           if (!window.electronAPI || typeof window.electronAPI.selectFiles !== 'function') return;
           window.electronAPI.selectFiles().then(function (paths) {
             if (!paths || !paths.length) return;
@@ -3561,7 +3565,10 @@
         if (ytModeMultiBtn) ytModeMultiBtn.className = multi ? 'suno-connect-btn' : 'suno-test-btn suno-btn-ghost';
       }
       if (ytModeSingleBtn) ytModeSingleBtn.addEventListener('click', function () { setYoutubeMode(false); });
-      if (ytModeMultiBtn) ytModeMultiBtn.addEventListener('click', function () { setYoutubeMode(true); });
+      if (ytModeMultiBtn) ytModeMultiBtn.addEventListener('click', function () {
+        if (!window.__sunoIsSystemKey) return;
+        setYoutubeMode(true);
+      });
 
       if (youtubeModal && openYoutubeBtn) {
         openYoutubeBtn.addEventListener('click', function () {
@@ -3910,6 +3917,7 @@
 
       if (ytMultiAddBtn && ytMultiLinks) {
         ytMultiAddBtn.addEventListener('click', function () {
+          if (!window.__sunoIsSystemKey) return;
           var lines = (ytMultiLinks.value || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
           if (!lines.length) return;
           // Lọc link sai định dạng/trùng lặp NGAY khi dán — các mục này
@@ -4100,9 +4108,13 @@
         var logMenuItem = document.getElementById('menuOpenLogViewerBtn');
         var logPopupIcon = document.getElementById('uploadConfirmLogBtn');
         var reverseLogPopupIcon = document.getElementById('reverseLogBtn');
+        var importModeMultiBtnEl = document.getElementById('importModeMultiBtn');
+        var ytModeMultiBtnEl = document.getElementById('ytModeMultiBtn');
         if (logMenuItem) logMenuItem.hidden = !isSystemKey;
         if (logPopupIcon) logPopupIcon.hidden = !isSystemKey;
         if (reverseLogPopupIcon) reverseLogPopupIcon.hidden = !isSystemKey;
+        if (importModeMultiBtnEl) importModeMultiBtnEl.hidden = !isSystemKey;
+        if (ytModeMultiBtnEl) ytModeMultiBtnEl.hidden = !isSystemKey;
       }
       function refreshSystemKeyVisibility() {
         if (!api || typeof api.sunoProLicenseInfo !== 'function') { applySystemKeyVisibility(false); return Promise.resolve(false); }
