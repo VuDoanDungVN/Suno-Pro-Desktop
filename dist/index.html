@@ -2900,7 +2900,10 @@
       // ── Popup hợp nhất cho toàn bộ tiến trình: 1 popup xuyên suốt từ lúc
       // cắt đoạn tới lúc xuất xong, chỉ đổi trạng thái loading/sẵn sàng/xong
       // — không còn hiện chữ kỹ thuật, không còn bật/tắt popup rời rạc. ────
-      function showProcessPopup() { if (uploadConfirmModal) uploadConfirmModal.classList.remove('hidden'); }
+      // Trong lúc pipeline Reverse (mới) đang chạy (window.__sunoReverseActive — xem block
+      // "Reverse" cuối file), popup cũ này KHÔNG được tự mở lên dù có gọi tới, tránh đè lên popup
+      // Reverse nếu có 1 lệnh gọi cũ nào đó (từ lần chạy trước còn sót lại) tới muộn.
+      function showProcessPopup() { if (uploadConfirmModal && !window.__sunoReverseActive) uploadConfirmModal.classList.remove('hidden'); }
       function hideProcessPopup() { if (uploadConfirmModal) uploadConfirmModal.classList.add('hidden'); }
       // Trong lúc đang chạy (loading): vẫn hiện cả 2 nút, nhưng "Upload" bị
       // khoá chìm (disabled, không bấm được) — chỉ "Loại bỏ" bấm được để
@@ -3388,15 +3391,14 @@
           var desiredBaseName = album.name + ' - ' + originalBaseName;
           window.sunoCurrentSongTitle = desiredBaseName; // tên SẠCH — dùng cho songsAdd/hiển thị, không dính tiền tố
           window.__sunoLogNeedsClear = true; // bài mới bắt đầu — xem icon 🪵/☰ bên dưới, log cũ sẽ bị xoá ở lần mở tiếp theo
+          if (typeof window.sunoRunReversePipeline === 'function') {
+            window.sunoRunReversePipeline(filePath, { title: desiredBaseName, registerSong: true, sourceLabel: 'Chọn bài hát' });
+            return;
+          }
           if (typeof window.electronAPI.prepareImportTitle !== 'function') {
             importFileAsIfPicked(filePath);
             return;
           }
-          // Tiền tố "_part " ở ĐẦU tên file gốc (không phải cuối, nơi bundle
-          // tự thêm "_partN") — nếu Suno cắt bớt tên quá dài (luôn cắt ở
-          // CUỐI), chữ "_part" ở đầu vẫn còn nguyên để hệ thống dọn dẹp lọc
-          // đúng clip. Marker này được gỡ lại trước khi đặt tên bài hoàn
-          // chỉnh lúc Xuất full MP3 (xem suno-split-export trong main.js).
           window.electronAPI.prepareImportTitle({ sourcePath: filePath, desiredBaseName: '_part ' + desiredBaseName }).then(function (renamed) {
             importFileAsIfPicked(renamed.path);
           }).catch(function () {
@@ -3615,9 +3617,12 @@
               var desiredBaseName = album ? (album.name + ' - ' + ytCurrentInfo.title) : ytCurrentInfo.title;
               window.sunoCurrentSongTitle = desiredBaseName; // tên SẠCH — dùng cho songsAdd/hiển thị
               window.__sunoLogNeedsClear = true; // bài mới bắt đầu — xem icon 🪵/☰ bên dưới, log cũ sẽ bị xoá ở lần mở tiếp theo
-              if (window.electronAPI && typeof window.electronAPI.prepareImportTitle === 'function') {
-                // Tiền tố "_part " ở đầu — xem giải thích ở nhánh Import phía
-                // trên; gỡ lại trước khi đặt tên bài hoàn chỉnh lúc Xuất MP3.
+              if (window.electronAPI && typeof window.electronAPI.debugLog === 'function') {
+                window.electronAPI.debugLog('[yt-check] typeof sunoRunReversePipeline = ' + (typeof window.sunoRunReversePipeline));
+              }
+              if (typeof window.sunoRunReversePipeline === 'function') {
+                window.sunoRunReversePipeline(result.path, { title: desiredBaseName, registerSong: true, sourceLabel: 'YouTube' });
+              } else if (window.electronAPI && typeof window.electronAPI.prepareImportTitle === 'function') {
                 window.electronAPI.prepareImportTitle({ sourcePath: result.path, desiredBaseName: '_part ' + desiredBaseName }).then(function (renamed) {
                   importFileAsIfPicked(renamed.path);
                 }).catch(function () {
@@ -3828,6 +3833,21 @@
             var desiredBaseName = album ? (album.name + ' - ' + item.label) : item.label;
             window.sunoCurrentSongTitle = desiredBaseName; // tên SẠCH — dùng cho songsAdd/hiển thị
             window.__sunoLogNeedsClear = true; // bài mới bắt đầu — xem icon 🪵/☰ bên dưới, log cũ sẽ bị xoá ở lần mở tiếp theo
+            if (typeof window.sunoRunReversePipeline === 'function') {
+              window.sunoRunReversePipeline(filePath, {
+                title: desiredBaseName,
+                registerSong: true,
+                isQueueItem: true,
+                sourceLabel: 'Hàng đợi',
+                onPhase: function (text) { item.phase = text; renderQueue(); }
+              }).then(function (result) {
+                item.state = result.ok ? 'done' : 'failed';
+                if (!result.ok) item.error = result.text || 'Có lỗi xảy ra.';
+                renderQueue();
+                resolve();
+              });
+              return;
+            }
             sunoQueueActiveItem = item;
             sunoQueuePositionLabel = '[' + (sunoQueue.indexOf(item) + 1) + '/' + sunoQueue.length + ']';
             pipelineDoneCallback = function (result) {
@@ -5145,6 +5165,9 @@
     var reverseProgressWrap = document.getElementById('reverseProgressWrap');
     var reverseProgressBar = document.getElementById('reverseProgressBar');
     var reverseProgressPct = document.getElementById('reverseProgressPct');
+    if (api && typeof api.debugLog === 'function') {
+      api.debugLog('[reverse-init] block loaded, api=' + !!api + ' btn=' + !!btn + ' statusEl=' + !!statusEl);
+    }
     if (!api || !btn || !statusEl) return;
 
     var FADE_SECONDS = 5;
@@ -5538,6 +5561,204 @@
         btn.disabled = false;
       });
     });
+
+    // ── Lối vào MỚI cho "Chọn bài hát" / YouTube / Hàng đợi — gọi hàm này thay vì nạp vào
+    // luồng Split-Studio cũ. Đây là bản sao riêng của chuỗi xử lý ở trên (không gọi lại hay
+    // sửa gì trong btn.addEventListener phía trên) — nút "⤵ Reverse" vẫn chạy đúng y nguyên
+    // luồng cũ của nó, độc lập hoàn toàn, để còn dùng được nếu hàm này có vấn đề gì.
+    var reverseImportBusy = false;
+    window.sunoRunReversePipeline = function (filePath, opts) {
+      opts = opts || {};
+      if (!filePath) return Promise.resolve({ ok: false, text: 'Thiếu file.' });
+      if (running || reverseImportBusy) {
+        return Promise.resolve({ ok: false, text: 'Đang có 1 tiến trình Reverse khác đang chạy — thử lại sau.' });
+      }
+      reverseImportBusy = true;
+      btn.disabled = true;
+      // Ẩn popup tiến trình của luồng Split-Studio cũ (nếu còn đang hiện/kẹt lại từ trước) —
+      // tránh nó đè lên popup Reverse. Và bật cờ window.__sunoReverseActive để popup cũ đó
+      // không tự mở lên lại nếu có 1 lệnh gọi muộn nào từ luồng cũ (xem showProcessPopup()).
+      window.__sunoReverseActive = true;
+      var staleOldPopup = document.getElementById('uploadConfirmModal');
+      if (staleOldPopup) staleOldPopup.classList.add('hidden');
+
+      var session, title, duration, projectId, seedClipId, exportClipId, exportDuration, finalClipId, finalTitle;
+      title = opts.title || fileBaseName(filePath);
+      var startedAt = Number.isFinite(opts.startedAt) ? opts.startedAt : Date.now();
+
+      function reportPhase(text) {
+        if (typeof opts.onPhase === 'function') opts.onPhase(text);
+      }
+      function stepQ(name, statusText, fn) {
+        reportPhase(statusText);
+        return step(name, statusText, fn);
+      }
+
+      logLine('——— Bắt đầu pipeline Reverse (' + (opts.sourceLabel || 'Import') + ') cho file: ' + filePath + ' ———');
+      showReverseRunning(title, 8);
+
+      return stepQ('Đọc file + session', 'Đang đọc file…', function () {
+        return Promise.all([getSession(), readDuration(filePath), api.readAudioFile(filePath)]);
+      })
+        .then(function (res) {
+          session = res[0];
+          duration = res[1];
+          var bytes = res[2];
+          var uploadFilename = filePath.split(/[\\/]/).pop();
+          logLine('Thời lượng file gốc: ' + duration.toFixed(2) + 's');
+          return stepQ('Reverse audio trước khi upload', 'Đang đảo chiều audio cục bộ…', function () {
+            return reverseAudioLocally(bytes).then(function (result) {
+              bytes = result.bytes;
+              uploadFilename = result.filename;
+              logLine('Đã đảo chiều audio cục bộ, sẽ upload file: ' + uploadFilename);
+            });
+          }).then(function () {
+            return stepQ('Upload nguyên bài lên Suno', 'Đang upload nguyên bài lên Suno…', function () {
+              return api.sunoUpload({ session: session, buffer: bytes, filename: uploadFilename, title: title, artist: '' });
+            });
+          });
+        })
+        .then(function (up) {
+          if (!up || !up.clipId) throw new Error('Suno không trả về clip ID sau khi upload.');
+          seedClipId = up.clipId;
+          logLine('clipId sau upload: ' + up.clipId);
+          return stepQ('Xác nhận độ dài thật từ Suno', 'Đang xác nhận độ dài thật của bài từ Suno…', function () {
+            return api.sunoClipDuration({ session: session, clipId: up.clipId }).then(function (res) {
+              var real = res && res.durationSec;
+              if (typeof real === 'number' && real > 0) {
+                duration = real;
+              }
+            }).catch(function (e) {
+              logLine('⚠ Không lấy được độ dài thật từ Suno (bỏ qua, dùng tạm số đọc trên máy ' + duration.toFixed(2) + 's): ' + cleanErrorMessage(e));
+            });
+          });
+        })
+        .then(function () {
+          return stepQ('Tạo project Studio', 'Đang tạo project Studio…', function () {
+            return api.sunoSplitAssemble({
+              session: session,
+              seedClipId: seedClipId,
+              seedTitle: title,
+              seedDurationSec: duration,
+              parts: [{ clipId: seedClipId, number: 1, title: title, durationSec: duration }]
+            });
+          })
+            .then(function (asm) {
+              projectId = asm && asm.projectId;
+              if (!projectId) throw new Error('Suno không trả về project ID.');
+              var studioUrl = asm && asm.studioUrl;
+              logLine('projectId: ' + projectId + (studioUrl ? ' (' + studioUrl + ')' : ''));
+              if (!studioUrl) throw new Error('Không có link Studio để xử lý.');
+              return api.sunoSplitInspect({ session: session, projectId: projectId }).then(function (insp) {
+                logLine('🔎 Sau ghép — tracks: ' + JSON.stringify((insp && insp.tracks) || []).slice(0, 900));
+              }).catch(function (e) {
+                logLine('⚠ Inspect sau ghép lỗi (bỏ qua, chỉ để chẩn đoán): ' + cleanErrorMessage(e));
+              }).then(function () {
+                return stepQ('Gửi lệnh cho AI Studio', 'Đang xử lý trên server (gửi lệnh AI + lưu)…', function () {
+                  return api.sunoStudioAgentStep({ studioUrl: studioUrl, session: session });
+                }).catch(function (e) {
+                  logLine('⚠ Gửi lệnh AI Studio lỗi (bỏ qua, vẫn tiếp tục render): ' + cleanErrorMessage(e));
+                });
+              });
+            })
+            .then(function () {
+              return api.sunoSplitInspect({ session: session, projectId: projectId }).then(function (insp) {
+                logLine('🔎 Trước render — tracks: ' + JSON.stringify((insp && insp.tracks) || []).slice(0, 900));
+              }).catch(function (e) {
+                logLine('⚠ Inspect trước render lỗi (bỏ qua, chỉ để chẩn đoán): ' + cleanErrorMessage(e));
+              });
+            })
+            .then(function () {
+              return stepQ('Render bài hoàn chỉnh', 'Đang render bài hoàn chỉnh…', function () {
+                return api.sunoSplitExport({ session: session, projectId: projectId, title: title });
+              });
+            })
+            .then(function (exp) {
+              exportClipId = exp && exp.clipId;
+              exportDuration = exp && exp.duration;
+              if (!exportClipId) throw new Error('Suno không trả về clip ID sau khi render.');
+              logLine('clipId sau render: ' + exportClipId + ', thời lượng: ' + (exportDuration != null ? exportDuration.toFixed(2) + 's' : '(không rõ)'));
+            });
+        })
+        .then(function () {
+          if (skipFadeEl && skipFadeEl.checked) {
+            finalClipId = exportClipId;
+            finalTitle = title;
+            logLine('Đã có bản render, chuyển sang bước dọn dẹp.');
+            return;
+          }
+          var fadeAt = (typeof exportDuration === 'number' && exportDuration > FADE_SECONDS) ? (exportDuration - FADE_SECONDS) : 0;
+          logLine('Sẽ fade từ giây thứ ' + fadeAt.toFixed(2) + ' (fade ' + FADE_SECONDS + 's cuối)');
+          return stepQ('Áp dụng Fade Out', 'Đang áp dụng Fade Out…', function () {
+            return api.sunoEditFade({ session: session, clipId: exportClipId, fadeOutTime: fadeAt, title: title + ' (Fade Out)' });
+          }).then(function (fade) {
+            finalClipId = fade && fade.clipId;
+            finalTitle = (fade && fade.title) || (title + ' (Fade Out)');
+            if (!finalClipId) throw new Error('Suno không trả về clip ID sau khi Fade Out.');
+            logLine('clipId cuối cùng (đã fade): ' + finalClipId);
+          });
+        })
+        .then(function () {
+          logLine('——— HOÀN TẤT — clipId cuối cùng: ' + finalClipId + ' ———');
+          return stepQ('Dọn dẹp thư viện', 'Đang dọn dẹp thư viện Suno…', function () {
+            return api.sunoCleanupKeepDone({
+              session: session,
+              title: title,
+              alwaysTrashIds: [seedClipId, exportClipId, finalClipId].filter(Boolean)
+            }).then(function (res) {
+              if (res && res.doneClipId) {
+                finalClipId = res.doneClipId;
+                finalTitle = '[Done] ' + title;
+                logLine('Đã tìm thấy bản "[Done] ' + title + '" — dùng làm bản cuối cùng, đã dọn ' + (res.trashedCount || 0) + ' clip khác.');
+              } else {
+                logLine('⚠ Không tìm thấy bản "[Done] ' + title + '" — giữ nguyên bản render/fade hiện tại, không xoá gì.');
+              }
+            }).catch(function (e) {
+              logLine('⚠ Dọn dẹp thư viện lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));
+            });
+          });
+        })
+        .then(function () {
+          function afterRegister() {
+            if (typeof window.refreshAlbumSongs === 'function') window.refreshAlbumSongs();
+            if (typeof window.refreshAlbums === 'function') window.refreshAlbums();
+            var hasMoreQueued = opts.isQueueItem && Array.isArray(window.sunoQueue) &&
+              window.sunoQueue.some(function (q) { return q.state === 'waiting'; });
+            if (hasMoreQueued) {
+              hideReverseDoneModal();
+            } else {
+              reversePendingClipId = finalClipId;
+              reversePendingTitle = finalTitle;
+              showReverseDone('✅ Hoàn tất! Bài "' + finalTitle + '" đã sẵn sàng.');
+            }
+            return { ok: true, text: finalTitle };
+          }
+          if (opts.registerSong && window.sunoCurrentAlbum && api && typeof api.songsAdd === 'function') {
+            return api.songsAdd({
+              title: finalTitle,
+              albumId: window.sunoCurrentAlbum.id,
+              durationSec: (typeof exportDuration === 'number' && exportDuration > 0) ? exportDuration : duration,
+              startedAt: startedAt,
+              finishedAt: Date.now(),
+              clipId: finalClipId,
+              songUrl: finalClipId ? ('https://suno.com/song/' + finalClipId) : null
+            }).catch(function () {}).then(afterRegister);
+          }
+          return afterRegister();
+        })
+        .catch(function (e) {
+          var msg = cleanErrorMessage(e);
+          logLine('✗ PIPELINE DỪNG LẠI: ' + msg);
+          hideReverseDoneModal();
+          return { ok: false, text: msg };
+        })
+        .then(function (result) {
+          reverseImportBusy = false;
+          window.__sunoReverseActive = false;
+          btn.disabled = running;
+          return result;
+        });
+    };
   });
   </script>
 
