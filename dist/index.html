@@ -3563,9 +3563,26 @@
       if (ytModeSingleBtn) ytModeSingleBtn.addEventListener('click', function () { setYoutubeMode(false); });
       if (ytModeMultiBtn) ytModeMultiBtn.addEventListener('click', function () { setYoutubeMode(true); });
 
+      // Xoá sạch link/thumbnail/thông tin của bài TRƯỚC còn sót lại trên popup — chỉ reset hiển
+      // thị (ADDITIVE, không đụng tới luồng tải/pipeline nào), để mỗi lần mở lại popup luôn là 1
+      // phiên sạch giống lần đầu, tránh nhầm còn sót dữ liệu bài cũ trên màn hình.
+      function resetYoutubeSingleUi() {
+        if (ytLinkInput) ytLinkInput.value = '';
+        ytCurrentInfo = null;
+        if (ytInfoBox) ytInfoBox.classList.add('hidden');
+        if (ytThumbPreview) ytThumbPreview.src = '';
+        if (ytTitlePreview) ytTitlePreview.textContent = '';
+        if (ytAuthorPreview) ytAuthorPreview.textContent = '';
+        if (ytStage) { ytStage.classList.add('hidden'); ytStage.textContent = ''; }
+        if (ytProgressBar) ytProgressBar.style.width = '0%';
+        if (ytDownloadBtn) ytDownloadBtn.disabled = false;
+        if (ytCancelBtn) ytCancelBtn.disabled = true;
+      }
+
       if (youtubeModal && openYoutubeBtn) {
         openYoutubeBtn.addEventListener('click', function () {
           setYoutubeMode(false); // luôn mở lại ở chế độ "1 link" cho gọn, dễ đoán
+          resetYoutubeSingleUi();
           youtubeModal.classList.remove('hidden');
         });
         if (closeYoutubeModalBtn) closeYoutubeModalBtn.addEventListener('click', function () { youtubeModal.classList.add('hidden'); });
