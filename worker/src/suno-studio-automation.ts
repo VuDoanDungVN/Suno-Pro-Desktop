@@ -69,12 +69,33 @@ const FOLLOWUP_PROMPT =
 /** Chạy toàn bộ bước 8 (gửi lệnh AI Studio + Export → Full Song) trên 1 trình duyệt headless của
  * Cloudflare Browser Rendering. Ném lỗi nếu bất kỳ bước bắt buộc nào thất bại — giống hệt hành vi
  * cũ (không có bước nào được phép "best-effort" ngầm ngoài những chỗ bản gốc đã cho phép). */
+// Cloudflare Browser Rendering tự giới hạn số browser tạo mới trong 1 khoảng thời gian (429
+// "Rate limit exceeded") — xảy ra khi test liên tục nhiều lần sát nhau. Thử lại tối đa 5 lần,
+// chờ tăng dần (3s/6s/9s/12s), chỉ với đúng lỗi 429 này (lỗi khác ném ra ngay, thử lại vô ích).
+async function launchBrowserWithRetry(env: Env, log: StudioAutomationLogger) {
+  const MAX_ATTEMPTS = 5;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      return await puppeteer.launch(env.BROWSER);
+    } catch (e: any) {
+      lastErr = e;
+      const msg = (e && e.message) || String(e);
+      const isRateLimited = /429/.test(msg) || /rate limit/i.test(msg);
+      if (!isRateLimited || attempt === MAX_ATTEMPTS - 1) throw e;
+      log(`Cloudflare đang giới hạn tốc độ tạo trình duyệt — thử lại lần ${attempt + 2}/${MAX_ATTEMPTS}…`);
+      await sleep(3000 * (attempt + 1));
+    }
+  }
+  throw lastErr;
+}
+
 export async function runStudioReverseAutomation(
   env: Env,
   opts: { cookieHeader: string; studioUrl: string },
   log: StudioAutomationLogger = () => {},
 ): Promise<StudioAutomationResult> {
-  const browser = await puppeteer.launch(env.BROWSER);
+  const browser = await launchBrowserWithRetry(env, log);
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 900 });
