@@ -1229,6 +1229,17 @@
             <div class="suno-upload-progress-track"><div id="reverseProgressBar" class="suno-upload-progress-bar" style="width:0%;"></div></div>
             <div id="reverseProgressPct" class="suno-upload-progress-pct">0%</div>
           </div>
+          <!-- Chỉ hiện khi đang chạy qua Hàng đợi (Import nhiều file / nhiều link YouTube) —
+               luồng 1 file/1 link vẫn giữ nguyên, phần này ẩn hoàn toàn (hidden mặc định). -->
+          <div id="reverseQueueBox" class="suno-upload-progress-wrap" style="margin-top:4px;" hidden>
+            <div class="suno-status" style="display:flex;justify-content:space-between;gap:8px;">
+              <span id="reverseQueueTotalLabel"></span>
+              <span id="reverseQueueTimer">⏱ tổng 00:00</span>
+            </div>
+            <div class="suno-upload-progress-track"><div id="reverseQueueProgressBar" class="suno-upload-progress-bar" style="width:0%;"></div></div>
+            <div id="reverseQueueProgressPct" class="suno-upload-progress-pct">0%</div>
+            <ol id="reverseQueuePendingList" class="suno-queue-list" style="text-align:left;margin-top:6px;max-height:120px;overflow-y:auto;"></ol>
+          </div>
           <div id="reverseDoneMsg" class="suno-status ok" style="margin:10px 0 6px;" hidden></div>
           <div id="reverseDoneActions" class="suno-split-step-row" style="gap:8px;" hidden>
             <button id="reverseDoneDownloadBtn" class="suno-connect-btn" type="button" style="flex:1;">⬇ Download</button>
@@ -3728,6 +3739,7 @@
         var hasItems = sunoQueue.length > 0;
         sunoQueuePanel.hidden = !hasItems;
         if (!hasItems) {
+          window.sunoQueueBatchStartedAt = null; // hàng đợi trống hẳn — hết 1 lượt chạy hàng loạt
           if (typeof window.refreshAlbumSongs === 'function') window.refreshAlbumSongs();
           return;
         }
@@ -3830,6 +3842,7 @@
       }
 
       function runQueueItem(item) {
+        if (!window.sunoQueueBatchStartedAt) window.sunoQueueBatchStartedAt = Date.now(); // mốc bắt đầu cả lượt hàng loạt (không reset giữa các bài)
         item.state = 'running';
         item.phase = 'Đang chuẩn bị…';
         renderQueue();
@@ -5179,6 +5192,12 @@
     var reverseProgressWrap = document.getElementById('reverseProgressWrap');
     var reverseProgressBar = document.getElementById('reverseProgressBar');
     var reverseProgressPct = document.getElementById('reverseProgressPct');
+    var reverseQueueBox = document.getElementById('reverseQueueBox');
+    var reverseQueueTotalLabel = document.getElementById('reverseQueueTotalLabel');
+    var reverseQueueTimer = document.getElementById('reverseQueueTimer');
+    var reverseQueueProgressBar = document.getElementById('reverseQueueProgressBar');
+    var reverseQueueProgressPct = document.getElementById('reverseQueueProgressPct');
+    var reverseQueuePendingList = document.getElementById('reverseQueuePendingList');
     if (api && typeof api.debugLog === 'function') {
       api.debugLog('[reverse-init] block loaded, api=' + !!api + ' btn=' + !!btn + ' statusEl=' + !!statusEl);
     }
@@ -5197,6 +5216,7 @@
     var reverseTimerHandle = null;
     var reverseTotalSteps = 1;
     var reverseCompletedSteps = 0;
+    var reverseQueueActive = false; // true chỉ khi lần chạy hiện tại là 1 mục của Hàng đợi (xem showReverseRunning)
     function formatReverseElapsed(ms) {
       var totalSec = Math.max(0, Math.floor(ms / 1000));
       var m = Math.floor(totalSec / 60);
@@ -5210,6 +5230,7 @@
       reverseTimerHandle = setInterval(function () {
         if (!reverseStartedAt || !reverseRunTimer) return;
         reverseRunTimer.textContent = '⏱ ' + formatReverseElapsed(Date.now() - reverseStartedAt);
+        updateReverseQueueSummary(); // cập nhật đồng hồ tổng mỗi giây (chỉ có tác dụng khi đang chạy Hàng đợi)
       }, 1000);
     }
     function stopReverseTimer() {
@@ -5220,13 +5241,56 @@
       if (reverseProgressBar) reverseProgressBar.style.width = pct + '%';
       if (reverseProgressPct) reverseProgressPct.textContent = pct + '%';
       if (reverseStepLabel && stepLabel) reverseStepLabel.textContent = window.__sunoIsSystemKey ? stepLabel : '';
+      updateReverseQueueSummary();
+    }
+    // Chỉ có dữ liệu khi đang chạy qua Hàng đợi (Import nhiều file / nhiều link YouTube —
+    // xem enqueueItems ở block "Hàng đợi xử lý" phía trên file này, window.sunoQueue được expose
+    // sẵn ra global). Luồng 1 file/1 link không đụng tới sunoQueue nên box này luôn ẩn cho 2
+    // luồng đó — không đổi gì ở luồng cũ.
+    function updateReverseQueueSummary() {
+      if (!reverseQueueBox) return;
+      var queue = window.sunoQueue;
+      var isBatchRun = !!(reverseQueueActive && Array.isArray(queue) && queue.length > 0);
+      reverseQueueBox.hidden = !isBatchRun;
+      if (!isBatchRun) return;
+      var total = queue.length;
+      var finished = 0;
+      queue.forEach(function (q) { if (q.state === 'done' || q.state === 'failed' || q.state === 'cancelled') finished++; });
+      var currentFraction = reverseTotalSteps > 0 ? Math.min(1, reverseCompletedSteps / reverseTotalSteps) : 0;
+      var pct = total > 0 ? Math.min(100, Math.round((finished + currentFraction) / total * 100)) : 0;
+      if (reverseQueueProgressBar) reverseQueueProgressBar.style.width = pct + '%';
+      if (reverseQueueProgressPct) reverseQueueProgressPct.textContent = pct + '%';
+      if (reverseQueueTotalLabel) reverseQueueTotalLabel.textContent = '📋 Tổng tiến trình: ' + finished + '/' + total;
+      if (reverseQueuePendingList) {
+        var pending = queue.filter(function (q) { return q.state === 'waiting'; });
+        reverseQueuePendingList.innerHTML = '';
+        pending.forEach(function (q) {
+          var li = document.createElement('li');
+          li.className = 'suno-queue-item';
+          var icon = document.createElement('span');
+          icon.className = 'suno-queue-item-icon';
+          icon.textContent = '⏳';
+          var title = document.createElement('span');
+          title.className = 'suno-queue-item-title';
+          title.textContent = q.label;
+          title.title = q.label;
+          li.appendChild(icon);
+          li.appendChild(title);
+          reverseQueuePendingList.appendChild(li);
+        });
+      }
+      if (reverseQueueTimer) {
+        var elapsedMs = window.sunoQueueBatchStartedAt ? (Date.now() - window.sunoQueueBatchStartedAt) : 0;
+        reverseQueueTimer.textContent = '⏱ tổng ' + formatReverseElapsed(elapsedMs);
+      }
     }
     // Gọi khi bắt đầu 1 lần chạy mới — hiện popup ở trạng thái "đang xử lý" (spinner, tên bài,
     // % = 0), ẩn phần Download/Tiếp tục. `totalSteps` tính trước theo đúng các bước SẼ chạy
     // (gồm/không gồm bước Reverse cục bộ + bước Fade Out tuỳ theo 2 checkbox lúc bấm nút).
-    function showReverseRunning(songTitle, totalSteps) {
+    function showReverseRunning(songTitle, totalSteps, isQueueItem) {
       reverseCompletedSteps = 0;
       reverseTotalSteps = totalSteps > 0 ? totalSteps : 1;
+      reverseQueueActive = !!isQueueItem;
       if (reverseDoneTitleEl) reverseDoneTitleEl.textContent = '⏳ Đang xử lý';
       if (reverseSpinner) reverseSpinner.hidden = false;
       if (reverseSongName) reverseSongName.textContent = '🎵 ' + songTitle;
@@ -5240,6 +5304,8 @@
     // Gọi khi đã có kết quả cuối cùng — chuyển popup sang trạng thái "xong", hiện 2 nút.
     function showReverseDone(msgText) {
       stopReverseTimer();
+      reverseQueueActive = false;
+      if (reverseQueueBox) reverseQueueBox.hidden = true;
       if (reverseDoneTitleEl) reverseDoneTitleEl.textContent = '✅ Hoàn tất';
       if (reverseSpinner) reverseSpinner.hidden = true;
       if (reverseProgressWrap) reverseProgressWrap.hidden = true;
@@ -5250,6 +5316,8 @@
 
     function hideReverseDoneModal() {
       stopReverseTimer();
+      reverseQueueActive = false;
+      if (reverseQueueBox) reverseQueueBox.hidden = true;
       if (reverseDoneModal) reverseDoneModal.classList.add('hidden');
     }
     if (reverseDoneDownloadBtn) {
@@ -5606,7 +5674,7 @@
       }
 
       logLine('——— Bắt đầu pipeline Reverse (' + (opts.sourceLabel || 'Import') + ') cho file: ' + filePath + ' ———');
-      showReverseRunning(title, 8);
+      showReverseRunning(title, 8, opts.isQueueItem);
 
       return stepQ('Đọc file + session', 'Đang đọc file…', function () {
         return Promise.all([getSession(), readDuration(filePath), api.readAudioFile(filePath)]);
