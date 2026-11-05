@@ -5820,7 +5820,10 @@
             var hasMoreQueued = opts.isQueueItem && Array.isArray(window.sunoQueue) &&
               window.sunoQueue.some(function (q) { return q.state === 'waiting'; });
             if (hasMoreQueued) {
-              hideReverseDoneModal();
+              // Còn bài chờ trong hàng đợi — ĐỂ POPUP MỞ LIÊN TỤC, không tắt rồi mở lại giữa 2
+              // bài: showReverseRunning() của bài kế tiếp (gọi ngay sau đây, xem runQueueItem)
+              // sẽ tự ghi đè tên bài/% /đồng hồ của bài này, người dùng chỉ thấy tiến trình chạy
+              // tiếp tự nhiên sang bài mới, không có khoảng tắt popup ở giữa.
             } else {
               reversePendingClipId = finalClipId;
               reversePendingTitle = finalTitle;
@@ -5844,7 +5847,12 @@
         .catch(function (e) {
           var msg = cleanErrorMessage(e);
           logLine('✗ PIPELINE DỪNG LẠI: ' + msg);
-          hideReverseDoneModal();
+          // Bài này lỗi nhưng hàng đợi còn bài khác đang chờ — không tắt popup, để
+          // showReverseRunning() của bài kế tiếp tự ghi đè, giữ popup mở liên tục y như lúc
+          // chạy xuôi không lỗi (xem khối hasMoreQueued ở afterRegister phía trên).
+          var stillHasMoreQueued = opts.isQueueItem && Array.isArray(window.sunoQueue) &&
+            window.sunoQueue.some(function (q) { return q.state === 'waiting'; });
+          if (!stillHasMoreQueued) hideReverseDoneModal();
           return { ok: false, text: msg };
         })
         .then(function (result) {
