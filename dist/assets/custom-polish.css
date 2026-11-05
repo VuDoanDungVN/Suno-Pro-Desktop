@@ -1488,6 +1488,25 @@ body.suno-login-locked .suno-sub-toolbar {
   text-align: center;
   font-size: 12px;
 }
+.suno-queue-item-thumb {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: var(--bg-elevated);
+}
+.suno-queue-item-thumb-icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+}
 .suno-queue-item-title {
   flex: 1 1 auto;
   min-width: 0;

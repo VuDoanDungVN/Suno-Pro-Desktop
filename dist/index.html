@@ -5267,15 +5267,31 @@
         pending.forEach(function (q) {
           var li = document.createElement('li');
           li.className = 'suno-queue-item';
-          var icon = document.createElement('span');
-          icon.className = 'suno-queue-item-icon';
-          icon.textContent = '⏳';
+          // YouTube: dùng luôn ảnh thumbnail CDN công khai của YouTube theo videoId đã có sẵn
+          // từ lúc dán link (queueParseYoutubeId), không cần gọi thêm API nào. File import: icon
+          // nốt nhạc mặc định (giống icon mặc định ở khung chuẩn bị file phía trên).
+          if (q.kind === 'youtube' && q.videoId) {
+            var thumbImg = document.createElement('img');
+            thumbImg.className = 'suno-queue-item-thumb';
+            thumbImg.src = 'https://i.ytimg.com/vi/' + q.videoId + '/mqdefault.jpg';
+            thumbImg.alt = '';
+            li.appendChild(thumbImg);
+          } else {
+            var thumbIcon = document.createElement('span');
+            thumbIcon.className = 'suno-queue-item-thumb-icon';
+            thumbIcon.textContent = '🎵';
+            li.appendChild(thumbIcon);
+          }
           var title = document.createElement('span');
           title.className = 'suno-queue-item-title';
           title.textContent = q.label;
           title.title = q.label;
-          li.appendChild(icon);
+          var status = document.createElement('span');
+          status.className = 'suno-queue-item-status';
+          status.style.color = 'var(--yellow)';
+          status.textContent = 'Đang ở hàng chờ.';
           li.appendChild(title);
+          li.appendChild(status);
           reverseQueuePendingList.appendChild(li);
         });
       }
