@@ -1686,9 +1686,17 @@
         try { return new Date(ms).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
         catch (e) { return null; }
       }
-      function renderLicenseInfo(license) {
+      function renderLicenseInfo(license, role) {
         if (!licenseInfoBody) return;
         if (!license) {
+          // KEY hệ thống (owner) không có bản ghi license nào (bypass hẳn DB, xem auth.ts::authorize)
+          // — "license: null" ở đây là ĐÚNG như thiết kế, không phải lỗi.
+          if (role === 'owner') {
+            licenseInfoBody.innerHTML =
+              '<div class="suno-license-info-row"><span class="suno-license-info-label">Loại Key</span><span class="suno-license-info-value">KEY hệ thống</span></div>' +
+              '<div class="suno-license-info-row"><span class="suno-license-info-label">Thời hạn</span><span class="suno-license-info-value">Không giới hạn</span></div>';
+            return;
+          }
           licenseInfoBody.innerHTML = '<p class="suno-status err">Không lấy được thông tin Key.</p>';
           return;
         }
@@ -1714,7 +1722,7 @@
           licenseInfoBody.innerHTML = '<p class="suno-status">Đang tải…</p>';
           if (!window.electronAPI || typeof window.electronAPI.sunoProLicenseInfo !== 'function') return;
           window.electronAPI.sunoProLicenseInfo().then(function (res) {
-            if (res && res.ok) renderLicenseInfo(res.license);
+            if (res && res.ok) renderLicenseInfo(res.license, res.role);
             else licenseInfoBody.innerHTML = '<p class="suno-status err">' + ((res && res.message) || 'Không lấy được thông tin Key.') + '</p>';
           }).catch(function () {
             licenseInfoBody.innerHTML = '<p class="suno-status err">Không lấy được thông tin Key.</p>';
