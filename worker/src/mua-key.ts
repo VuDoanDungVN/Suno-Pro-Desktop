@@ -63,7 +63,6 @@ export function muaKeyPageHtml(): Response {
   <div id="msg" class="msg bad" hidden></div>
   <form id="form" style="display:grid;gap:14px">
     <div class="plans" id="plans">
-      <label class="plan" data-plan="7d"><input type="radio" name="plan" value="7d"><span class="plan-label">Gói 7 ngày</span></label>
       <label class="plan" data-plan="30d"><input type="radio" name="plan" value="30d" checked><span class="plan-label">Gói 30 ngày</span></label>
       <label class="plan" data-plan="6m"><input type="radio" name="plan" value="6m"><span class="plan-label">Gói 6 tháng</span></label>
       <label class="plan" data-plan="365d"><input type="radio" name="plan" value="365d"><span class="plan-label">Gói 1 năm</span></label>
