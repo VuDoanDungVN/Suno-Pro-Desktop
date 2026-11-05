@@ -749,12 +749,9 @@ function sunoSessionFile() {
   return path.join(app.getPath('userData'), 'suno-session.json');
 }
 
-// Danh sách model Suno — không có endpoint liệt kê riêng, Suno gắn kèm
-// field `models` ngay trong response /suno/verify (billing/info) mỗi lần
-// kiểm tra session (xem suno-proxy.ts::verify ở Worker, port từ cvt3.js
-// của app tham khảo: nó cũng chỉ đọc lại field này, không gọi API khác).
-// Cache ra 1 file JSON (không nhạy cảm, không phải session) để dropdown
-// Model ở popup Tạo nhạc có dữ liệu ngay cả trước khi verify lại session.
+// Danh sách model Suno lấy từ field `models` trong response /suno/verify (xem
+// suno-proxy.ts::verify ở Worker). Cache ra 1 file JSON (không nhạy cảm, không phải session) để
+// dropdown Model ở popup Tạo nhạc có dữ liệu ngay cả trước khi verify lại session.
 function modelsCacheFile() {
   return path.join(app.getPath('userData'), 'models-cache.json');
 }
@@ -885,18 +882,13 @@ async function sunoRequest(url, options = {}) {
 }
 
 // Resolve the pasted session into a usable Bearer token (+ optional cookie header).
-// device-id mà Suno đòi hỏi trên mọi request KHÔNG phải tự bịa — đúng theo cách Suno Toolkit
-// (extension chính thức) làm, nó lấy từ cookie "ajs_anonymous_id" của chính suno.com, bỏ dấu
-// ngoặc kép bọc ngoài nếu có (một số nơi lưu cookie dạng "uuid" có ngoặc).
 function sunoNormalizeDeviceId(raw) {
   if (typeof raw !== 'string') return '';
   return raw.replace(/^["']|["']$/g, '').trim();
 }
 
-// Cache JWT vừa mint qua Clerk — tránh phải xin JWT mới (2 lượt gọi thẳng clerk.suno.com) cho
-// MỖI lần gọi sunoResolveToken(). Trước đây khi split-upload nhiều part liên tiếp (ví dụ 75 part
-// cho 1 bài), mỗi part đều mint lại từ đầu dù session chưa đổi — tốn thêm ~1-2s/part oan uổng.
-// JWT Clerk mặc định sống 60s, cache 45s để có đệm an toàn trước khi hết hạn.
+// Cache token vừa mint — tránh phải xin token mới cho MỖI lần gọi sunoResolveToken() trong
+// cùng 1 lượt xử lý.
 const SUNO_TOKEN_CACHE_MS = 45000;
 let sunoTokenCache = null; // { rawSession, token, cookieHeader, deviceId, mintedAt }
 
@@ -1151,11 +1143,8 @@ ipcMain.handle('suno-upload', async (event, payload) => {
   return { clipId: final.clipId, songUrl: final.songUrl, metadataApplied: final.metadataApplied, muted: final.copyrightMuted };
 });
 
-// Lấy ĐÚNG độ dài thật do chính Suno đo được cho 1 clip (metadata.duration) — dùng để thay cho
-// cách đọc duration bằng thẻ <audio> trên máy (có thể sai gần một nửa với vài kiểu MP3 VBR thiếu
-// header seek chuẩn), tránh timeline Studio (suno-split-assemble) bị đặt ngắn hơn thật khiến bài
-// render ra bị cụt mất phần sau. Poll /suno/generate-status (đã tự chờ đúng status==="complete"
-// + metadata.duration mới coi là "ready") tới khi có hoặc hết giờ.
+// Lấy độ dài thật do Suno đo được cho 1 clip (metadata.duration) — dùng để cập nhật lại thời
+// lượng trước khi tạo project Studio. Poll /suno/generate-status tới khi có hoặc hết giờ.
 ipcMain.handle('suno-clip-duration', async (event, payload) => {
   if (!payload || !payload.session || !payload.clipId) throw new Error('Thiếu session hoặc clip ID.');
   const { token, cookieHeader, deviceId } = await sunoResolveToken(payload.session);
@@ -1392,11 +1381,8 @@ ipcMain.handle('suno-split-export', async (event, payload) => {
   const { session, projectId, title } = payload;
   if (!projectId) throw new Error('Thiếu project ID.');
   const { token, cookieHeader, deviceId } = await sunoResolveToken(session);
-  // Tên file gốc được cố ý ghép tiền tố "_part " ở ĐẦU trước khi đưa vào Suno
-  // (xem index.html) — để dù Suno có cắt bớt phần ĐUÔI tên quá dài thì chữ
-  // "_part" vẫn còn nguyên ở đầu, hệ thống dọn dẹp mới lọc đúng được các
-  // clip part. Nhưng đó là mẹo NỘI BỘ cho việc upload part — bài hoàn chỉnh
-  // xuất ra cuối cùng phải mang tên SẠCH, không được dính tiền tố này.
+  // "_part " prefix (xem index.html) chỉ dùng nội bộ lúc upload part — bài hoàn chỉnh xuất ra
+  // phải mang tên SẠCH, không dính tiền tố này.
   const cleanTitle = typeof title === 'string' ? title.replace(/^_part\s+/i, '') : title;
   const start = await callSunoProWorker('/suno/studio/export/start', { token, cookieHeader, deviceId, projectId, title: cleanTitle });
   const deadline = Date.now() + 10 * 60 * 1000;
@@ -1533,12 +1519,9 @@ ipcMain.handle('suno-generate', async (event, payload) => {
   const clips = clipIds.map((id) => doneClips.get(id) || { clipId: id, failed: true, status: 'timeout' });
   if (clips.every((c) => c.failed)) throw new Error('Suno tạo nhạc thất bại hoặc quá thời gian chờ (>10 phút).');
 
-  // "Xử lý Lyrics": payload.prompt (đã gửi lên Suno để tạo nhạc) có thể chứa thêm đoạn đệm
-  // "wvwv..." khác với payload.originalPrompt (lyrics thật, không đệm) — nếu 2 cái khác nhau
-  // nghĩa là đã bật tuỳ chọn này, nên sau khi audio tạo xong, tự gọi API set-clip-prompt để ghi
-  // đè lại lyrics hiển thị trên chính suno.com về đúng bản gốc, không còn thấy đoạn đệm nữa. Audio
-  // đã render xong không bị ảnh hưởng gì (chỉ đổi phần chữ hiển thị). Best-effort: lỗi ở bước này
-  // (vd. Suno đổi API) không được làm hỏng kết quả tạo nhạc chính, chỉ bỏ qua âm thầm.
+  // "Xử lý Lyrics": nếu payload.prompt khác payload.originalPrompt, tự gọi API set-clip-prompt
+  // để ghi đè lại lyrics hiển thị trên suno.com về đúng bản gốc. Best-effort: lỗi ở bước này
+  // không được làm hỏng kết quả tạo nhạc chính, chỉ bỏ qua âm thầm.
   if (typeof payload.originalPrompt === 'string' && payload.originalPrompt !== payload.prompt) {
     for (const c of clips) {
       if (c.failed) continue;

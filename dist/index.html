@@ -2762,10 +2762,7 @@
           }
           genErrorBox.hidden = true;
           // "Xử lý Lyrics": chỉ thêm vào chuỗi GỬI LÊN SUNO (promptForSuno), không đụng tới
-          // genLyricsInput.value — nên ô Lời bài hát trên UI không bao giờ hiện đoạn đệm này.
-          // Suno giới hạn tối đa 5000 ký tự — luôn chừa đúng 1 ký tự an toàn, nên TỔNG (lời bài hát
-          // + dấu xuống dòng + đệm) không bao giờ vượt quá 4999 ký tự, bất kể lời bài hát dài/ngắn
-          // thế nào (đệm chỉ lấp đúng phần còn trống, không cộng thêm cố định 4000 ký tự như trước).
+          // genLyricsInput.value — ô Lời bài hát trên UI không bao giờ hiện đoạn đệm này.
           var promptForSuno = lyrics;
           if (genPaddingChk && genPaddingChk.checked) {
             var SUNO_PROMPT_MAX = 4999;

@@ -82,6 +82,55 @@ Reverse, sửa popup đè nhau, reset popup YouTube) — còn lại đều chỉ
 hiển thị thông thường, không nêu cách Suno/Studio được tự động hoá hay lý do kỹ thuật nào khác —
 không cần xoá thêm.
 
+## 7. (Lần rà soát thứ 3 — mở rộng sang `electron/main.js`, trước đó chỉ soát `dist/index.html`)
+
+Cùng 1 bug MP3 VBR duration ở item (3) hoá ra còn lặp lại 1 bản khác trong `electron/main.js`
+(hàm `suno-clip-duration`), chưa bị xoá lần trước vì audit cũ chỉ soát `dist/index.html`:
+
+> Lấy ĐÚNG độ dài thật do chính Suno đo được cho 1 clip (metadata.duration) — dùng để thay cho
+> cách đọc duration bằng thẻ `<audio>` trên máy (có thể sai gần một nửa với vài kiểu MP3 VBR thiếu
+> header seek chuẩn), tránh timeline Studio (suno-split-assemble) bị đặt ngắn hơn thật khiến bài
+> render ra bị cụt mất phần sau. Poll `/suno/generate-status` (đã tự chờ đúng status==="complete"
+> + metadata.duration mới coi là "ready") tới khi có hoặc hết giờ.
+
+Cùng khu vực `electron/main.js`, phát hiện thêm 4 đoạn mới (chưa từng được audit vì không nằm
+trong luồng Reverse, mà ở luồng upload-part gốc + luồng "Tạo nhạc bằng AI"):
+
+- **Device-id lấy từ cookie `ajs_anonymous_id`:** `sunoNormalizeDeviceId()` có comment nói rõ
+  cách suy ra device-id Suno yêu cầu là copy đúng theo cách 1 extension tham khảo làm, lấy từ
+  cookie `ajs_anonymous_id` của suno.com. **Lộ gì:** cách bịa/suy ra 1 header xác thực Suno yêu
+  cầu + tên nguồn tham khảo đã port theo.
+- **TTL token Clerk 60s + chi tiết "75 part":** comment cache token nói rõ "JWT Clerk mặc định
+  sống 60s" và kể lại trường hợp cụ thể "split-upload 75 part cho 1 bài" từng bị mint lại token
+  dư thừa. **Lộ gì:** thời gian sống thật của token xác thực Suno (Clerk JWT) + chi tiết quy mô
+  vận hành nội bộ (bao nhiêu part/bài).
+- **"_part " prefix né việc Suno cắt đuôi tên dài:** comment ở bước export nói rõ Suno tự cắt bớt
+  PHẦN ĐUÔI của tên file quá dài, nên phải chèn "_part" ở ĐẦU để hệ thống dọn dẹp lọc đúng part.
+  **Lộ gì:** hành vi cắt tên file của Suno + mẹo đặt tên để lách qua hành vi đó.
+- **Đệm lyrics "wv" tới sát 5000 ký tự:** comment ở luồng Tạo nhạc AI (và bản song song trong
+  `dist/index.html`) giải thích rõ Suno giới hạn tối đa 5000 ký tự và lý do đệm đúng tới 4999 ký
+  tự. **Lộ gì:** giới hạn ký tự thật của Suno + mục đích/cách tính toán phần đệm.
+- **Danh sách model lấy từ field `models` trong `/suno/verify`:** comment nói Suno không có
+  endpoint liệt kê model riêng, và việc này "port từ cvt3.js của app tham khảo". **Lộ gì:** 1 đặc
+  điểm API của Suno (thiếu endpoint) + tên file nguồn đã tham khảo/port theo.
+
+Toàn bộ 5 đoạn trên đã được rút ngắn trong cả `electron/main.js` và `dist/index.html` (chỗ có bản
+song song) — chỉ còn mô tả CHỨC NĂNG (gọi API nào, làm gì), không còn giải thích "vì sao"/"Suno có
+hành vi gì"/"copy theo nguồn nào". Logic/giá trị hằng số (vd. `SUNO_PROMPT_MAX = 4999`,
+`SUNO_TOKEN_CACHE_MS = 45000`) giữ nguyên 100%, chỉ xoá phần giải thích bằng lời.
+
+**Đã xem nhưng CHƯA xử lý — cần bạn quyết định riêng:** cụm comment ở `electron/main.js` (khoảng
+dòng 2025–2545) giải thích cách app đọc cookie đăng nhập Suno từ trình duyệt thật của người dùng
+qua Chrome DevTools Protocol (CDP) — bao gồm chi tiết: nhân bản (clone) toàn bộ profile trình
+duyệt để lách việc Chrome/Edge bản 136+ chặn remote debugging trên profile gốc, mở trình duyệt ở
+vị trí ngoài màn hình, dùng cổng debug để đọc cookie rồi tắt tiến trình. Đây LÀ 1 kỹ thuật cụ thể,
+nhưng khác loại với các mục trên: cơ chế này đã được giải thích công khai ngay trong hộp thoại xác
+nhận hiển thị cho người dùng khi họ bấm dùng tính năng ("mở lại ở cửa sổ tạm thời ở chế độ ẩn để
+đọc cookie __client/__session") — nên không hẳn là bí mật bị giấu kín, và đối tượng "bị qua mặt"
+là hành vi của Chrome/Edge (công khai, Google tự công bố) chứ không phải Suno. Tôi chưa xoá/rút
+gọn cụm này — nếu bạn vẫn muốn ẩn luôn các chi tiết này (vd. số phiên bản Chrome/Edge cụ thể, lý do
+phải nhân bản profile), nói tôi biết để xử lý riêng.
+
 **Lưu ý riêng (không phải lộ kỹ thuật, nhưng cần nhớ):** `electron/main.js` hiện đang có:
 ```
 // TẠM trỏ sang worker staging để test — nhớ đổi lại trước khi build bản phát hành cho khách.
