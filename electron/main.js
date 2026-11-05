@@ -1714,20 +1714,6 @@ ipcMain.handle('songs-list', async (event, payload) => {
   return { songs: filtered, total: filtered.length };
 });
 
-// Thống kê gọn (không kéo cả danh sách bài qua IPC) cho thẻ "Bắt đầu / Kết
-// thúc / Tổng thời gian" ở màn Album — vẫn tính trên TOÀN BỘ bài của album
-// (không bị ảnh hưởng bởi phân trang ở trên).
-ipcMain.handle('songs-album-stats', async (event, payload) => {
-  const albumId = payload && payload.albumId !== undefined ? payload.albumId : null;
-  const songs = loadSongs().filter((s) => s.albumId === albumId);
-  const timed = songs.filter((s) => s.startedAt && s.finishedAt && s.finishedAt > s.startedAt);
-  if (!timed.length) return { hasStats: false };
-  const earliestStart = Math.min.apply(null, timed.map((s) => s.startedAt));
-  const latestEnd = Math.max.apply(null, timed.map((s) => s.finishedAt));
-  const totalSec = timed.reduce((sum, s) => sum + (s.finishedAt - s.startedAt) / 1000, 0);
-  return { hasStats: true, earliestStart, latestEnd, totalSec };
-});
-
 // Mở 1 URL bằng trình duyệt mặc định hệ thống — dùng cho nút "Mở bài trên
 // Suno" ở trang chi tiết bài hát. Chỉ cho phép http(s), tránh mở nhầm
 // scheme khác (file://, javascript:…) nếu dữ liệu sau này bị hỏng/giả mạo.

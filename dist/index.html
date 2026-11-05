@@ -421,27 +421,6 @@
          logic lưu trữ mới. Refresh khi mở album (selectAlbum) và ngay sau
          khi 1 bài mới được ghi (songsAdd) để danh sách luôn cập nhật. -->
     <div id="albumSongsPanel" class="suno-panel" style="margin-bottom:12px;">
-      <!-- Thẻ thời gian: Bắt đầu = startedAt sớm nhất, Kết thúc = finishedAt
-           muộn nhất, Tổng thời gian = tổng (finishedAt-startedAt) từng bài
-           (thời gian XỬ LÝ, khác với "Bài đầy đủ dài" = độ dài audio của bài
-           ở mỗi dòng bên dưới). Ẩn khi album chưa có bài nào. -->
-      <div id="albumStatsCard" class="album-stats-card" hidden>
-        <div class="album-stat-box">
-          <span class="album-stat-box-label">Bắt đầu</span>
-          <span id="albumStatsStartTime" class="album-stat-box-value">--:--</span>
-          <span id="albumStatsStartDate" class="album-stat-box-date"></span>
-        </div>
-        <div class="album-stat-box">
-          <span class="album-stat-box-label">Kết thúc</span>
-          <span id="albumStatsEndTime" class="album-stat-box-value">--:--</span>
-          <span id="albumStatsEndDate" class="album-stat-box-date"></span>
-        </div>
-        <div class="album-stat-box">
-          <span class="album-stat-box-label">Tổng thời gian</span>
-          <span id="albumStatsTotalTime" class="album-stat-box-value album-stat-box-value-accent">--:--</span>
-        </div>
-      </div>
-
       <!-- Khối "① Chuẩn bị" — chuyển từ #sunoSplitPanel lên đây, cùng
            id/logic, chỉ đổi vị trí DOM cho giống bố cục ảnh mẫu (thẻ
            "Gửi bài hát lên Hệ thống" + 2 nút Chọn bài hát/YouTube). -->
@@ -4457,7 +4436,6 @@
         if (subToolbarBackBtn) subToolbarBackBtn.hidden = false;
         albumSongsPage = 1;
         if (albumSongsSearchInput) albumSongsSearchInput.value = '';
-        fetchAlbumStats(album.id);
         refreshAlbumSongs();
       }
 
@@ -4466,12 +4444,6 @@
       var albumSongsSearchInput = document.getElementById('albumSongsSearchInput');
       var albumSongsTabs = document.getElementById('albumSongsTabs');
       var albumSongsDoneCount = document.getElementById('albumSongsDoneCount');
-      var albumStatsCard = document.getElementById('albumStatsCard');
-      var albumStatsStartTime = document.getElementById('albumStatsStartTime');
-      var albumStatsStartDate = document.getElementById('albumStatsStartDate');
-      var albumStatsEndTime = document.getElementById('albumStatsEndTime');
-      var albumStatsEndDate = document.getElementById('albumStatsEndDate');
-      var albumStatsTotalTime = document.getElementById('albumStatsTotalTime');
       var albumSongsCache = []; // CHỈ trang hiện tại (10 bài/trang) — không phải cả album
       var albumSongsFilter = 'all'; // 'all' | 'running' | 'done' | 'failed'
       var albumSongsPagination = document.getElementById('albumSongsPagination');
@@ -4489,39 +4461,6 @@
         var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
         return sameDay ? (pad2(d.getHours()) + ':' + pad2(d.getMinutes())) : (pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1));
       }
-      function albumStatsTimeParts(ts) {
-        if (!ts) return { time: '--:--', date: '' };
-        var d = new Date(ts);
-        return { time: pad2(d.getHours()) + ':' + pad2(d.getMinutes()), date: pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + '/' + d.getFullYear() };
-      }
-
-      // Thẻ "Bắt đầu / Kết thúc / Tổng thời gian" — thời gian XỬ LÝ (từ lúc
-      // bấm Cắt đoạn tự động tới lúc ghi xong songsAdd), khác với "Bài đầy đủ
-      // dài Ns" ở mỗi dòng bài hát (độ dài AUDIO của bài). Bài cũ (lưu trước
-      // khi có startedAt/finishedAt) bị bỏ qua khi tính, không gây lệch.
-      // Nhận thẳng kết quả gọn từ IPC songsAlbumStats (tính trên TOÀN BỘ bài
-      // của album, không phụ thuộc trang đang xem) — không còn cần kéo cả
-      // mảng bài hát qua đây chỉ để tính thống kê.
-      function renderAlbumStats(stats) {
-        if (!albumStatsCard) return;
-        if (!stats || !stats.hasStats) { albumStatsCard.hidden = true; return; }
-        albumStatsCard.hidden = false;
-        var start = albumStatsTimeParts(stats.earliestStart);
-        var end = albumStatsTimeParts(stats.latestEnd);
-        if (albumStatsStartTime) albumStatsStartTime.textContent = start.time;
-        if (albumStatsStartDate) albumStatsStartDate.textContent = start.date;
-        if (albumStatsEndTime) albumStatsEndTime.textContent = end.time;
-        if (albumStatsEndDate) albumStatsEndDate.textContent = end.date;
-        if (albumStatsTotalTime) albumStatsTotalTime.textContent = formatAlbumDuration(stats.totalSec);
-      }
-      function fetchAlbumStats(albumId) {
-        if (!window.electronAPI || typeof window.electronAPI.songsAlbumStats !== 'function') return;
-        window.electronAPI.songsAlbumStats({ albumId: albumId }).then(function (stats) {
-          if (!window.sunoCurrentAlbum || window.sunoCurrentAlbum.id !== albumId) return;
-          renderAlbumStats(stats);
-        }).catch(function () {});
-      }
-
       function renderAlbumSongsList() {
         if (!albumSongsList) return;
         var query = ((albumSongsSearchInput && albumSongsSearchInput.value) || '').trim().toLowerCase();
@@ -4634,8 +4573,7 @@
 
       // Chỉ xin ĐÚNG 1 trang (10 bài, mới nhất trước) mỗi lần — không tải cả
       // album — đổi trang/tìm kiếm mới gọi lại IPC, tránh tốn tài nguyên khi
-      // album có nhiều bài. Thống kê (renderAlbumStats) tách riêng, không phụ
-      // thuộc trang đang xem — xem fetchAlbumStats().
+      // album có nhiều bài.
       function refreshAlbumSongs() {
         if (!albumSongsList || !window.sunoCurrentAlbum || !window.electronAPI || typeof window.electronAPI.songsList !== 'function') return;
         var albumId = window.sunoCurrentAlbum.id;

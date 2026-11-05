@@ -132,7 +132,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // when that album was later deleted (then it's null = "Chưa phân loại").
   songsAdd: (payload) => ipcRenderer.invoke('songs-add', payload),
   songsList: (payload) => ipcRenderer.invoke('songs-list', payload),
-  songsAlbumStats: (payload) => ipcRenderer.invoke('songs-album-stats', payload),
   songsUpdate: (payload) => ipcRenderer.invoke('songs-update', payload),
   songsDelete: (payload) => ipcRenderer.invoke('songs-delete', payload),
 
