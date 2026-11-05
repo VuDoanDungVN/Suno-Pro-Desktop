@@ -44,6 +44,7 @@ import { guideOgImage, guidePageHtml } from "./guide";
 import { broadcastPreview, broadcastStart, broadcastStatus } from "./broadcast";
 import { muaKeyPageHtml, muaKeySuccessPageHtml } from "./mua-key";
 import { adminListPayments, createCheckout, getOrderStatus, stripeWebhook } from "./stripe";
+import { checkQuota, incrementQuota } from "./quota";
 import {
   cleanup,
   cleanupKeepDone,
@@ -199,11 +200,18 @@ async function routeSuno(pathname: string, method: string, request: Request, env
   }
   if (pathname === "/suno/upload/init" && method === "POST") {
     requireApp(ctx);
+    // Chặn SỚM ở đây (trước khi tốn công/băng thông upload) nếu đã hết lượt hôm nay — chỉ đọc,
+    // chưa cộng lượt (xem checkQuota trong quota.ts).
+    await checkQuota(env, ctx, "upload");
     return uploadInit(request, env);
   }
   if (pathname === "/suno/upload/finish" && method === "POST") {
     requireApp(ctx);
-    return uploadFinish(request, env);
+    const res = await uploadFinish(request, env);
+    // uploadFinish() ném lỗi nếu thất bại (không chạy tới đây) — tới được đây nghĩa là Suno đã
+    // xác nhận upload thành công, mới thật sự trừ 1 lượt.
+    await incrementQuota(env, ctx, "upload");
+    return res;
   }
   if (pathname === "/suno/upload/status" && method === "POST") {
     requireApp(ctx);
@@ -251,7 +259,12 @@ async function routeSuno(pathname: string, method: string, request: Request, env
   }
   if (pathname === "/suno/generate" && method === "POST") {
     requireApp(ctx);
-    return generate(request, env);
+    await checkQuota(env, ctx, "generate");
+    const res = await generate(request, env);
+    // generate() ném lỗi nếu thất bại (không chạy tới đây) — tới được đây nghĩa là Suno đã tạo
+    // nhạc thành công, mới thật sự trừ 1 lượt.
+    await incrementQuota(env, ctx, "generate");
+    return res;
   }
   if (pathname === "/suno/generate-status" && method === "POST") {
     requireApp(ctx);

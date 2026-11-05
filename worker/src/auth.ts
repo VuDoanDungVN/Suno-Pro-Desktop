@@ -32,6 +32,7 @@ interface LicenseRow {
   status: "active" | "revoked";
   expires_at: number | null;
   is_trial: number;
+  plan: string | null;
   device_id: string | null;
   device_name: string | null;
   activated_at: number | null;
@@ -78,6 +79,7 @@ function licenseView(row: LicenseRow) {
     status: row.status,
     expiresAt: row.expires_at,
     isTrial: !!row.is_trial,
+    plan: row.plan,
     daysLeft: row.expires_at === null ? null : Math.max(0, Math.ceil((row.expires_at - now()) / DAY_MS)),
     deviceName: row.device_name,
     activatedAt: row.activated_at,
@@ -519,6 +521,7 @@ export async function adminList(env: Env): Promise<Response> {
       status: r.status,
       expiresAt: r.expires_at,
       isTrial: !!r.is_trial,
+      plan: r.plan,
       deviceBound: !!r.device_id,
       deviceName: r.device_name,
       activatedAt: r.activated_at,
@@ -532,24 +535,39 @@ export async function adminList(env: Env): Promise<Response> {
   return json({ licenses });
 }
 
-/** `POST /admin/licenses { name, email?, note?, hours?, days? }` → trả KEY gốc.
- * Đúng 1 trong `hours`/`days` có tác dụng (ưu tiên `hours` nếu cả 2 đều có) — bỏ trống cả 2 = vĩnh viễn. */
+/** `plan` quyết định giới hạn lượt upload/tạo nhạc trong ngày (xem src/quota.ts) — PHẢI khớp
+ * đúng với thời hạn thật của KEY, không tin tưởng mù vào giá trị `plan` admin gửi lên: validate
+ * lại ở đây (KEY "thời gian" chỉ 1-12 giờ; "30 ngày"/"1 năm" đúng số ngày; "vĩnh viễn" không hạn). */
+const VALID_PLANS = new Set(["time", "d30", "d365", "forever"]);
+
+/** `POST /admin/licenses { name, email?, note?, hours?, days?, plan? }` → trả KEY gốc.
+ * Đúng 1 trong `hours`/`days` có tác dụng (ưu tiên `hours` nếu cả 2 đều có) — bỏ trống cả 2 = vĩnh viễn.
+ * `plan`: 'time' (1-12 giờ) | 'd30' (30 ngày) | 'd365' (365 ngày) | 'forever' (vĩnh viễn) — bỏ
+ * trống hoặc không khớp thời hạn thật thì lưu NULL (= không giới hạn lượt, coi như KEY đặc biệt). */
 export async function adminCreate(request: Request, env: Env): Promise<Response> {
-  const body = await readJson<{ name?: unknown; email?: unknown; note?: unknown; hours?: unknown; days?: unknown }>(request);
+  const body = await readJson<{ name?: unknown; email?: unknown; note?: unknown; hours?: unknown; days?: unknown; plan?: unknown }>(request);
   const name = cleanText(body.name, 120) ?? "Khách hàng";
   const email = cleanText(body.email, 200);
   const note = cleanText(body.note, 500);
   const hours = typeof body.hours === "number" && body.hours > 0 ? body.hours : null;
   const days = typeof body.days === "number" && body.days > 0 ? body.days : null;
   const durationMs = hours ? hours * 60 * 60_000 : days ? days * DAY_MS : null;
+  const planInput = typeof body.plan === "string" ? body.plan : null;
+  let plan: string | null = VALID_PLANS.has(planInput ?? "") ? (planInput as string) : null;
+  // Khớp lại plan với thời hạn thật được gửi lên — tránh trường hợp admin gửi "plan: d365" nhưng
+  // "days: 30" (hoặc ngược lại) do bug/giả mạo request, dẫn tới giới hạn sai hẳn với thời hạn thật.
+  if (plan === "time" && !(hours && hours >= 1 && hours <= 12)) plan = null;
+  if (plan === "d30" && days !== 30) plan = null;
+  if (plan === "d365" && days !== 365) plan = null;
+  if (plan === "forever" && durationMs !== null) plan = null;
   const { key, hash, hint, enc } = await newKey(env);
   const id = crypto.randomUUID();
   const t = now();
   await env.DB.prepare(
-    `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+    `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, plan, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
   )
-    .bind(id, hash, hint, enc, name, email, note, durationMs ? t + durationMs : null, t, t)
+    .bind(id, hash, hint, enc, name, email, note, durationMs ? t + durationMs : null, plan, t, t)
     .run();
   return json({ key, license: licenseView(await getLicense(env, id)) });
 }
@@ -579,8 +597,8 @@ export async function adminCreateBulk(request: Request, env: Env): Promise<Respo
     await env.DB.batch(
       items.slice(i, i + CHUNK).map((it) =>
         env.DB.prepare(
-          `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, is_trial, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, NULL, ?, 'active', ?, 1, ?, ?)`,
+          `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, is_trial, plan, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, NULL, ?, 'active', ?, 1, 'trial', ?, ?)`,
         ).bind(it.id, it.hash, it.hint, it.enc, it.name, note, expiresAt, t, t),
       ),
     );
@@ -640,8 +658,8 @@ export async function createTrialLicense(env: Env, name: string, email: string, 
   const id = crypto.randomUUID();
   const t = now();
   await env.DB.prepare(
-    `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, is_trial, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, 'active', ?, 1, ?, ?)`,
+    `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, is_trial, plan, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, NULL, 'active', ?, 1, 'trial', ?, ?)`,
   )
     .bind(id, hash, hint, enc, name, email, t + durationMs, t, t)
     .run();
@@ -656,14 +674,18 @@ export async function issueLicense(
   opts: { name: string; email: string; note?: string | null; days: number | null },
 ): Promise<{ id: string; key: string }> {
   const durationMs = opts.days === null ? null : opts.days * DAY_MS;
+  // Chỉ 2 gói đang bán qua Stripe (30d/365d, xem stripe.ts) khớp đúng 1 trong 2 plan có giới hạn
+  // cố định — gói nào khác (hoặc vĩnh viễn) thì để NULL (vĩnh viễn = không giới hạn sẵn rồi, nên
+  // không cần gán 'forever' riêng ở đây).
+  const plan = opts.days === 30 ? "d30" : opts.days === 365 ? "d365" : null;
   const { key, hash, hint, enc } = await newKey(env);
   const id = crypto.randomUUID();
   const t = now();
   await env.DB.prepare(
-    `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+    `INSERT INTO licenses (id, key_hash, key_hint, key_enc, name, email, note, status, expires_at, plan, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
   )
-    .bind(id, hash, hint, enc, opts.name, opts.email, opts.note ?? null, durationMs === null ? null : t + durationMs, t, t)
+    .bind(id, hash, hint, enc, opts.name, opts.email, opts.note ?? null, durationMs === null ? null : t + durationMs, plan, t, t)
     .run();
   return { id, key };
 }

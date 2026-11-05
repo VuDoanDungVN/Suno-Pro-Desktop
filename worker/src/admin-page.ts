@@ -308,19 +308,15 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   <form method="dialog" id="create-form">
     <label class="field"><span>Tên khách</span><input class="input" name="name" required maxlength="80" placeholder="Ví dụ: Anh Nam · Zalo 09xx"></label>
     <label class="field"><span>Email khách (tùy chọn)</span><input class="input" name="email" type="email" maxlength="200"></label>
-    <div class="field"><span>Thời hạn</span>
+    <div class="field"><span>Thời hạn (quyết định luôn giới hạn lượt upload/tạo nhạc mỗi ngày)</span>
       <div class="plans">
-        <label><input type="radio" name="term" value="h1"><span>1 giờ<small>dùng thử nhanh</small></span></label>
-        <label><input type="radio" name="term" value="h24"><span>24 giờ<small>dùng thử</small></span></label>
-        <label><input type="radio" name="term" value="d7"><span>7 ngày<small>dùng thử</small></span></label>
-        <label><input type="radio" name="term" value="d30" checked><span>30 ngày<small>1 tháng</small></span></label>
-        <label><input type="radio" name="term" value="d90"><span>90 ngày<small>3 tháng</small></span></label>
-        <label><input type="radio" name="term" value="d365"><span>365 ngày<small>1 năm</small></span></label>
-        <label><input type="radio" name="term" value="forever"><span>Vĩnh viễn<small>không hết hạn</small></span></label>
-        <label><input type="radio" name="term" value="custom"><span>Tùy chỉnh<small>theo giờ</small></span></label>
+        <label><input type="radio" name="term" value="time"><span>KEY thời gian<small>1-12 giờ · 3 lượt/ngày</small></span></label>
+        <label><input type="radio" name="term" value="d30" checked><span>30 ngày<small>60 lượt/ngày</small></span></label>
+        <label><input type="radio" name="term" value="d365"><span>365 ngày<small>1 năm · không giới hạn</small></span></label>
+        <label><input type="radio" name="term" value="forever"><span>Vĩnh viễn<small>không hết hạn · không giới hạn</small></span></label>
       </div>
-      <label class="field" id="term-custom-hours-field" hidden style="margin-top:8px"><span>Số giờ</span>
-        <input class="input" name="customHours" type="number" min="1" max="8760" step="1" placeholder="Tối thiểu 1 giờ"></label>
+      <label class="field" id="term-custom-hours-field" hidden style="margin-top:8px"><span>Số giờ (1-12)</span>
+        <input class="input" name="customHours" type="number" min="1" max="12" step="1" placeholder="Từ 1 đến 12 giờ"></label>
     </div>
     <label class="field"><span>Ghi chú (chỉ bạn thấy)</span><textarea class="input" name="note" rows="2" maxlength="300" placeholder="Đã thanh toán, kênh liên hệ…"></textarea></label>
     <div class="d-actions"><button class="btn ghost" value="cancel" formnovalidate>Hủy</button><button class="btn primary" value="ok">Tạo key</button></div>
@@ -561,6 +557,10 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     if (!l.deviceBound) return { key: "active", tone: "muted", label: "Chưa kích hoạt" };
     return { key: "active", tone: "ok", label: "Đang dùng" };
   }
+  const PLAN_LABELS = { time: "KEY thời gian · 3 lượt/ngày", trial: "KEY thử · 30 lượt/ngày", d30: "KEY 30 ngày · 60 lượt/ngày", d365: "KEY 1 năm · không giới hạn", forever: "KEY vĩnh viễn · không giới hạn" };
+  function planLabel(l) {
+    return PLAN_LABELS[l.plan] || "Không xác định · không giới hạn";
+  }
   function term(l) {
     if (l.status === "revoked") return { cls: "off", pct: 0, text: l.expiresAt ? date(l.expiresAt) : "—", sub: "đã thu hồi" };
     if (!l.expiresAt) return { cls: "", pct: 100, text: "Không hết hạn", sub: "Vĩnh viễn" };
@@ -709,7 +709,8 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
           '<button class="btn sm" data-act="rotate">' + icon("refresh") + 'Cấp key mới</button></div></div>' +
         '<div class="section"><h3>Thời hạn</h3><div class="term ' + t.cls + '" style="padding:12px;border-radius:10px;background:var(--card);border:1px solid var(--line)">' +
           '<b>' + t.text + '</b> <span class="sub">· ' + t.sub + '</span><div class="bar"><i style="width:' + t.pct + '%"></i></div>' +
-          '<span class="sub">Tạo ' + dateTime(l.createdAt) + (l.activatedAt ? ' · kích hoạt ' + dateTime(l.activatedAt) : '') + '</span></div>' +
+          '<span class="sub">Tạo ' + dateTime(l.createdAt) + (l.activatedAt ? ' · kích hoạt ' + dateTime(l.activatedAt) : '') + '</span>' +
+          '<span class="sub">' + esc(planLabel(l)) + '</span></div>' +
           '<div class="chips" style="margin-top:10px">' + [7, 30, 90, 365].map((d) => '<button class="btn sm" data-extend="' + d + '">' + icon("plus") + d + ' ngày</button>').join("") + '</div></div>' +
         '<div class="section"><h3>Thiết bị</h3><div class="facts"><div class="fact"><span>Máy tính</span><b>' + (l.deviceBound ? esc(l.deviceName || "Máy tính") : "Chưa kích hoạt") + '</b>' +
           '<span>' + (l.lastSeenAt ? 'hoạt động ' + ago(l.lastSeenAt) : '—') + '</span></div></div></div>' +
@@ -808,20 +809,18 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   $("#scrim").addEventListener("click", closeDrawer);
   document.addEventListener("keydown", (e) => e.key === "Escape" && selectedId && closeDrawer());
 
-  const TERM_HOURS = { h1: 1, h24: 24 };
-  const TERM_DAYS = { d7: 7, d30: 30, d90: 90, d365: 365 };
+  const TERM_DAYS = { d30: 30, d365: 365 };
   function termDuration(f) {
     const t = f.get("term");
-    if (t in TERM_HOURS) return { hours: TERM_HOURS[t], days: null };
-    if (t in TERM_DAYS) return { hours: null, days: TERM_DAYS[t] };
-    if (t === "custom") {
+    if (t === "time") {
       const hours = Number(f.get("customHours"));
-      if (!Number.isInteger(hours) || hours < 1) throw new Error("Nhập số giờ hợp lệ (tối thiểu 1 giờ).");
-      return { hours, days: null };
+      if (!Number.isInteger(hours) || hours < 1 || hours > 12) throw new Error("KEY thời gian chỉ nhận từ 1 đến 12 giờ.");
+      return { hours, days: null, plan: "time" };
     }
-    return { hours: null, days: null };
+    if (t in TERM_DAYS) return { hours: null, days: TERM_DAYS[t], plan: t };
+    return { hours: null, days: null, plan: "forever" };
   }
-  $("#create-form").addEventListener("change", (e) => { if (e.target.name !== "term") return; $("#term-custom-hours-field").hidden = e.target.value !== "custom"; });
+  $("#create-form").addEventListener("change", (e) => { if (e.target.name !== "term") return; $("#term-custom-hours-field").hidden = e.target.value !== "time"; });
   const openCreate = () => { $("#create-form").reset(); $("#term-custom-hours-field").hidden = true; $("#create").showModal(); };
   $("#new-key").addEventListener("click", openCreate);
   $("#empty").addEventListener("click", (e) => e.target.closest('[data-act="new"]') && openCreate());
@@ -874,8 +873,8 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     if ($("#create").returnValue !== "ok") return;
     const f = new FormData($("#create-form"));
     try {
-      const { hours, days } = termDuration(f);
-      const res = await apiFetch("/admin/licenses", { method: "POST", body: JSON.stringify({ name: f.get("name"), email: f.get("email") || undefined, hours: hours ?? undefined, days: days ?? undefined, note: f.get("note") }) });
+      const { hours, days, plan } = termDuration(f);
+      const res = await apiFetch("/admin/licenses", { method: "POST", body: JSON.stringify({ name: f.get("name"), email: f.get("email") || undefined, hours: hours ?? undefined, days: days ?? undefined, plan, note: f.get("note") }) });
       showKey('Key cho "' + res.license.name + '"', res.license, res.key);
       await load({ quiet: true });
     } catch (error) { toast(error.message, "bad"); }

@@ -75,6 +75,9 @@ body {
 .section-label {
   font-size: 11px;
 }
+/* Trạng thái "đạt giới hạn" (quota) — vàng, khác với lỗi thật (đỏ) hoặc thành công (xanh), đã có
+   sẵn trong main-*.js (.ok/.err). */
+.suno-status.warn { color: var(--yellow); }
 
 /* Shape language: 10px cards, 8px controls, 14px dialogs (reference values) */
 .settings-card,

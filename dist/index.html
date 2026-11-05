@@ -2823,7 +2823,12 @@
           }).catch(function (e) {
             generateRunningWrap.hidden = true;
             generateFormWrap.hidden = false;
-            genErrorBox.textContent = '✗ ' + cleanIpcErrorMessage(e);
+            var genMsg = cleanIpcErrorMessage(e);
+            // Lỗi "đạt giới hạn lượt/ngày" (quota) là 1 dạng giới hạn bình thường, không phải sự
+            // cố — tô vàng + icon ⏳ riêng, khác với lỗi thật (đỏ + ✗).
+            var genIsQuota = /Đã đạt giới hạn \d+ lượt/.test(genMsg);
+            genErrorBox.className = 'suno-status ' + (genIsQuota ? 'warn' : 'err');
+            genErrorBox.textContent = (genIsQuota ? '⏳ ' : '✗ ') + genMsg;
             genErrorBox.hidden = false;
           });
         });
@@ -5249,8 +5254,9 @@
       if (reverseSpinner) reverseSpinner.hidden = false;
       if (reverseSongName) reverseSongName.textContent = '🎵 ' + songTitle;
       if (reverseProgressWrap) reverseProgressWrap.hidden = false;
-      if (reverseDoneMsg) reverseDoneMsg.hidden = true;
+      if (reverseDoneMsg) { reverseDoneMsg.hidden = true; reverseDoneMsg.className = 'suno-status ok'; }
       if (reverseDoneActions) reverseDoneActions.hidden = true;
+      if (reverseDoneDownloadBtn) reverseDoneDownloadBtn.hidden = false; // showReverseError() có thể đã ẩn ở lần chạy trước
       updateReverseProgress('Đang bắt đầu…');
       startReverseTimer();
       if (reverseDoneModal) reverseDoneModal.classList.remove('hidden');
@@ -5264,8 +5270,31 @@
       if (reverseSpinner) reverseSpinner.hidden = true;
       if (reverseProgressWrap) reverseProgressWrap.hidden = true;
       if (reverseStepLabel) reverseStepLabel.textContent = '';
-      if (reverseDoneMsg) { reverseDoneMsg.hidden = false; reverseDoneMsg.textContent = msgText; }
+      if (reverseDoneMsg) { reverseDoneMsg.hidden = false; reverseDoneMsg.className = 'suno-status ok'; reverseDoneMsg.textContent = msgText; }
       if (reverseDoneActions) reverseDoneActions.hidden = false;
+    }
+    // Gọi khi pipeline lỗi hẳn (không còn bài nào trong hàng đợi để tiếp tục) — thay vì tắt popup
+    // im lặng như trước, hiện rõ lý do ngay trong popup. Lỗi "đạt giới hạn lượt/ngày" (quota) tô
+    // vàng + icon ⏳ (một dạng giới hạn bình thường, không phải sự cố), lỗi khác tô đỏ + icon ✗.
+    function showReverseError(msgText) {
+      stopReverseTimer();
+      reverseQueueActive = false;
+      if (reverseQueueBox) reverseQueueBox.hidden = true;
+      var isQuota = /Đã đạt giới hạn \d+ lượt/.test(String(msgText || ''));
+      if (reverseDoneTitleEl) reverseDoneTitleEl.textContent = isQuota ? '⏳ Đã đạt giới hạn hôm nay' : '✗ Có lỗi xảy ra';
+      if (reverseSpinner) reverseSpinner.hidden = true;
+      if (reverseProgressWrap) reverseProgressWrap.hidden = true;
+      if (reverseStepLabel) reverseStepLabel.textContent = '';
+      if (reverseDoneMsg) {
+        reverseDoneMsg.hidden = false;
+        reverseDoneMsg.className = 'suno-status ' + (isQuota ? 'warn' : 'err');
+        reverseDoneMsg.textContent = (isQuota ? '⏳ ' : '✗ ') + msgText;
+      }
+      reversePendingClipId = null;
+      reversePendingTitle = null;
+      if (reverseDoneDownloadBtn) reverseDoneDownloadBtn.hidden = true; // không có bản nào để tải khi lỗi/đạt giới hạn
+      if (reverseDoneActions) reverseDoneActions.hidden = false;
+      if (reverseDoneModal) reverseDoneModal.classList.remove('hidden');
     }
 
     function hideReverseDoneModal() {
@@ -5588,7 +5617,7 @@
         var msg = cleanErrorMessage(e);
         logLine('✗ PIPELINE DỪNG LẠI: ' + msg);
         setStatus('✗ ' + msg, 'err');
-        hideReverseDoneModal();
+        showReverseError(msg);
       }).then(function () {
         running = false;
         btn.disabled = false;
@@ -5790,7 +5819,7 @@
           // chạy xuôi không lỗi (xem khối hasMoreQueued ở afterRegister phía trên).
           var stillHasMoreQueued = opts.isQueueItem && Array.isArray(window.sunoQueue) &&
             window.sunoQueue.some(function (q) { return q.state === 'waiting'; });
-          if (!stillHasMoreQueued) hideReverseDoneModal();
+          if (!stillHasMoreQueued) showReverseError(msg);
           return { ok: false, text: msg };
         })
         .then(function (result) {
