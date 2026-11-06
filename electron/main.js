@@ -562,7 +562,9 @@ ipcMain.handle('trial-start', () => {
 // hoạt" cũ (ký offline, xem dist/assets/main-9QM-JpB-.js) không còn đủ để dùng
 // được các chức năng chính, vì "cách làm" (payload Studio state, EQ mặc định,
 // endpoint chính xác…) không còn nằm trong app phát hành cho khách nữa.
-const SUNOPRO_WORKER_API = 'https://suno-pro-worker.vudungit92.workers.dev';
+// URL thật nằm trong electron/worker-env.json — file này được script build ghi lại TRƯỚC khi
+// đóng gói (xem scripts/set-worker-env.js), nên không còn phải sửa tay rồi quên đổi lại.
+const SUNOPRO_WORKER_API = JSON.parse(fs.readFileSync(path.join(__dirname, 'worker-env.json'), 'utf8')).workerApi;
 
 function sunoProDeviceIdFile() {
   return path.join(app.getPath('userData'), 'sunopro-device-id.json');

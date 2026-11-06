@@ -7,9 +7,12 @@
   "license": "ISC",
   "scripts": {
     "start": "electron .",
-    "package:mac": "electron-packager . \"Suno Pro\" --overwrite --platform=darwin --arch=arm64,x64 --icon=build/icon.icns --out=out --app-bundle-id=com.sunopro.app --prune=true --asar --ignore=\"^/out($|/)\" --ignore=\"^/dist/assets/.*\\.map$\" --ignore=\"^/worker($|/)\" --ignore=\"^/docs($|/)\" --ignore=\"^/scripts($|/)\" --ignore=\"^/\\.git($|/)\" --ignore=\"^/README\\.md$\" --ignore=\"^/\\.gitignore$\"",
-    "package:win": "node scripts/package-win.js && node scripts/set-win-icon.js",
-    "package:all": "npm run package:mac && npm run package:win"
+    "package:mac": "node scripts/set-worker-env.js production && electron-packager . \"Suno Pro\" --overwrite --platform=darwin --arch=arm64,x64 --icon=build/icon.icns --out=out --app-bundle-id=com.sunopro.app --prune=true --asar --ignore=\"^/out($|/)\" --ignore=\"^/dist/assets/.*\\.map$\" --ignore=\"^/worker($|/)\" --ignore=\"^/docs($|/)\" --ignore=\"^/scripts($|/)\" --ignore=\"^/\\.git($|/)\" --ignore=\"^/README\\.md$\" --ignore=\"^/\\.gitignore$\"",
+    "package:win": "node scripts/set-worker-env.js production && node scripts/package-win.js && node scripts/set-win-icon.js",
+    "package:all": "npm run package:mac && npm run package:win",
+    "package:mac:staging": "node scripts/set-worker-env.js staging && electron-packager . \"Suno Pro\" --overwrite --platform=darwin --arch=arm64,x64 --icon=build/icon.icns --out=out --app-bundle-id=com.sunopro.app --prune=true --asar --ignore=\"^/out($|/)\" --ignore=\"^/dist/assets/.*\\.map$\" --ignore=\"^/worker($|/)\" --ignore=\"^/docs($|/)\" --ignore=\"^/scripts($|/)\" --ignore=\"^/\\.git($|/)\" --ignore=\"^/README\\.md$\" --ignore=\"^/\\.gitignore$\"; node scripts/set-worker-env.js production",
+    "package:win:staging": "node scripts/set-worker-env.js staging && node scripts/package-win.js && node scripts/set-win-icon.js; node scripts/set-worker-env.js production",
+    "package:all:staging": "npm run package:mac:staging && npm run package:win:staging"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",

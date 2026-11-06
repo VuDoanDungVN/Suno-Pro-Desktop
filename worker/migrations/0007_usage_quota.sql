@@ -2,7 +2,7 @@
 -- toàn trên Worker (D1), không phụ thuộc client/giờ máy khách nên không thể crack bằng cách
 -- sửa app hay chỉnh giờ máy.
 
--- 'time' (1-12 giờ) | 'trial' (dùng thử) | 'd30' (30 ngày) | 'd365' (1 năm) | 'forever' (vĩnh
+-- 'd1' (1 ngày) | 'trial' (dùng thử) | 'd30' (30 ngày) | 'd365' (1 năm) | 'forever' (vĩnh
 -- viễn). NULL = không xác định được loại (KEY tạo trước khi có cột này, hoặc trường hợp đặc
 -- biệt) → coi như KHÔNG GIỚI HẠN (xem getPlanLimit trong src/quota.ts), để không làm gãy trải
 -- nghiệm khách đã mua trước đây.

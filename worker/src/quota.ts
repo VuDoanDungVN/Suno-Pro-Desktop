@@ -15,7 +15,7 @@ export type QuotaAction = "upload" | "generate";
 /** null = không giới hạn. Loại KEY không có trong bảng này (hoặc `plan` là NULL — KEY tạo trước
  * khi có tính năng này) cũng coi như không giới hạn, xem `getPlanLimit()`. */
 const DAILY_LIMITS: Record<string, { upload: number | null; generate: number | null }> = {
-  time: { upload: 3, generate: 3 },
+  d1: { upload: 3, generate: 3 },
   trial: { upload: 30, generate: 30 },
   d30: { upload: 60, generate: 60 },
   d365: { upload: null, generate: null },

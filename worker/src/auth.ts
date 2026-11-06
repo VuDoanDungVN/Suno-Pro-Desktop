@@ -537,26 +537,25 @@ export async function adminList(env: Env): Promise<Response> {
 
 /** `plan` quyết định giới hạn lượt upload/tạo nhạc trong ngày (xem src/quota.ts) — PHẢI khớp
  * đúng với thời hạn thật của KEY, không tin tưởng mù vào giá trị `plan` admin gửi lên: validate
- * lại ở đây (KEY "thời gian" chỉ 1-12 giờ; "30 ngày"/"1 năm" đúng số ngày; "vĩnh viễn" không hạn). */
-const VALID_PLANS = new Set(["time", "d30", "d365", "forever"]);
+ * lại ở đây ("1 ngày"/"30 ngày"/"1 năm" đúng số ngày; "vĩnh viễn" không hạn). */
+const VALID_PLANS = new Set(["d1", "d30", "d365", "forever"]);
 
-/** `POST /admin/licenses { name, email?, note?, hours?, days?, plan? }` → trả KEY gốc.
- * Đúng 1 trong `hours`/`days` có tác dụng (ưu tiên `hours` nếu cả 2 đều có) — bỏ trống cả 2 = vĩnh viễn.
- * `plan`: 'time' (1-12 giờ) | 'd30' (30 ngày) | 'd365' (365 ngày) | 'forever' (vĩnh viễn) — bỏ
+/** `POST /admin/licenses { name, email?, note?, days?, plan? }` → trả KEY gốc.
+ * `days` có tác dụng khi > 0 — bỏ trống = vĩnh viễn.
+ * `plan`: 'd1' (1 ngày) | 'd30' (30 ngày) | 'd365' (365 ngày) | 'forever' (vĩnh viễn) — bỏ
  * trống hoặc không khớp thời hạn thật thì lưu NULL (= không giới hạn lượt, coi như KEY đặc biệt). */
 export async function adminCreate(request: Request, env: Env): Promise<Response> {
-  const body = await readJson<{ name?: unknown; email?: unknown; note?: unknown; hours?: unknown; days?: unknown; plan?: unknown }>(request);
+  const body = await readJson<{ name?: unknown; email?: unknown; note?: unknown; days?: unknown; plan?: unknown }>(request);
   const name = cleanText(body.name, 120) ?? "Khách hàng";
   const email = cleanText(body.email, 200);
   const note = cleanText(body.note, 500);
-  const hours = typeof body.hours === "number" && body.hours > 0 ? body.hours : null;
   const days = typeof body.days === "number" && body.days > 0 ? body.days : null;
-  const durationMs = hours ? hours * 60 * 60_000 : days ? days * DAY_MS : null;
+  const durationMs = days ? days * DAY_MS : null;
   const planInput = typeof body.plan === "string" ? body.plan : null;
   let plan: string | null = VALID_PLANS.has(planInput ?? "") ? (planInput as string) : null;
   // Khớp lại plan với thời hạn thật được gửi lên — tránh trường hợp admin gửi "plan: d365" nhưng
   // "days: 30" (hoặc ngược lại) do bug/giả mạo request, dẫn tới giới hạn sai hẳn với thời hạn thật.
-  if (plan === "time" && !(hours && hours >= 1 && hours <= 12)) plan = null;
+  if (plan === "d1" && days !== 1) plan = null;
   if (plan === "d30" && days !== 30) plan = null;
   if (plan === "d365" && days !== 365) plan = null;
   if (plan === "forever" && durationMs !== null) plan = null;
