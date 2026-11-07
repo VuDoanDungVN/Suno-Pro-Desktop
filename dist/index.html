@@ -439,13 +439,8 @@
           <button id="reversePipelineBtn" class="suno-test-btn" type="button" hidden title="Upload nguyên bài lên Studio (không cắt part), đảo chiều cục bộ trước khi upload, áp dụng lệnh AI cố định, render rồi tải về">⤵ Reverse</button>
         </div>
         <!-- Pitch áp dụng cho lần import/tải TIẾP THEO qua "Chọn bài hát"/"YouTube" (cả 1 file/link
-             và hàng đợi Nhiều file/Nhiều link) — xem window.__sunoPitchSemitones, áp dụng ở 2 nơi:
-             (1) pitchShiftAudioLocally() cục bộ TRƯỚC khi upload (chạy ngay trước
-             reverseAudioLocally() trong sunoRunReversePipeline, giữ nguyên giá trị người dùng
-             chọn); (2) gửi kèm nguyên giá trị đó qua api.sunoStudioAgentStep({ pitchSemitones }) —
-             server tự ĐẢO DẤU rồi điền vào ô "Semitones" của Suno Studio sau bước Reverse (xem
-             worker/src/suno-studio-automation.ts, theo đúng yêu cầu: chọn −2 ở đây thì ô Semitones
-             nhận +2). Pitch = 0 → bỏ qua cả 2, chạy như cũ. -->
+             và hàng đợi Nhiều file/Nhiều link) — xem window.__sunoPitchSemitones (đọc tại thời
+             điểm bấm, dùng trong sunoRunReversePipeline). Pitch = 0 → bỏ qua, chạy như cũ. -->
         <div class="suno-split-step-row" style="margin-top:8px;flex-direction:column;align-items:stretch;gap:4px;">
           <span class="field-label-sm" style="margin:0;">Pitch :</span>
           <div class="suno-split-step-row" style="gap:0;width:100%;">
@@ -1167,7 +1162,7 @@
               </label>
             </div>
             <label class="field-label-sm" for="sunoSplitSecs">Số giây mỗi đoạn</label>
-            <input type="text" id="sunoSplitSecs" class="suno-seconds-input suno-prep-secs-input" value="4" readonly aria-label="Số giây mỗi đoạn — cố định 4 giây" title="Mỗi đoạn cố định 4 giây — khớp với mức mặc định của extension Chrome chính chủ, giúp giảm tỷ lệ Suno từ chối nội dung (đoạn ngắn khó bị dò trùng bản quyền hơn).">
+            <input type="text" id="sunoSplitSecs" class="suno-seconds-input suno-prep-secs-input" value="4" readonly aria-label="Số giây mỗi đoạn — cố định 4 giây" title="Mỗi đoạn cố định 4 giây — khớp với mức mặc định của extension Chrome chính chủ.">
             <span class="step-tag step-tag-alt">Cách khác (thủ công)</span>
             <div class="suno-panel-row">
               <button id="sunoOpenLogin" class="suno-test-btn suno-btn-ghost" title="Mở trình duyệt đã chọn (đúng profile) lên trang Suno để bạn đăng nhập bằng tay, rồi bấm lại nút Tự lấy session">Mở trình duyệt login</button>

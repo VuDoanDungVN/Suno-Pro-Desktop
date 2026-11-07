@@ -224,8 +224,8 @@ export async function runStudioReverseAutomation(
     if (!reverseClicked) {
       throw new Error('Không bấm được nút "Reverse" để đảo audio (giao diện có thể đã đổi).');
     }
-    log('Đã bấm "Reverse", đợi 5 giây…');
-    await sleep(5000);
+    log('Đã bấm "Reverse", đợi 10 giây…');
+    await sleep(10000);
 
     // Điền Pitch vào ô "Semitones" của panel Clip editor — chỉ khi khác 0 (giữ hành vi cũ khi
     // Pitch = 0, không đụng gì tới ô này). ĐẢO DẤU so với giá trị người dùng chọn ở app (client
