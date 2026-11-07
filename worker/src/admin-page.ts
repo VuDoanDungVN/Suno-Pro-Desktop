@@ -787,7 +787,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     if (!l.deviceBound) return { key: "active", tone: "muted", label: "Chưa kích hoạt" };
     return { key: "active", tone: "ok", label: "Đang dùng" };
   }
-  const PLAN_LABELS = { d1: "KEY 1 ngày · 3 lượt/ngày", trial: "KEY thử · 30 lượt/ngày", d30: "KEY 30 ngày · 60 lượt/ngày", d365: "KEY 1 năm · không giới hạn", forever: "KEY vĩnh viễn · không giới hạn" };
+  const PLAN_LABELS = { d1: "KEY 1 ngày · 3 lượt/ngày", trial: "KEY thử · 30 lượt/ngày", d30: "KEY 30 ngày · 60 lượt/ngày", d180: "KEY 6 tháng · không giới hạn", d365: "KEY 1 năm · không giới hạn", forever: "KEY vĩnh viễn · không giới hạn" };
   function planLabel(l) {
     return PLAN_LABELS[l.plan] || "Không xác định · không giới hạn";
   }
@@ -941,7 +941,17 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
           '<b>' + t.text + '</b> <span class="sub">· ' + t.sub + '</span><div class="bar"><i style="width:' + t.pct + '%"></i></div>' +
           '<span class="sub">Tạo ' + dateTime(l.createdAt) + (l.activatedAt ? ' · kích hoạt ' + dateTime(l.activatedAt) : '') + '</span>' +
           '<span class="sub">' + esc(planLabel(l)) + '</span></div>' +
-          '<div class="chips" style="margin-top:10px">' + [7, 30, 90, 365].map((d) => '<button class="btn sm" data-extend="' + d + '">' + icon("plus") + d + ' ngày</button>').join("") + '</div></div>' +
+          '<div class="chips" style="margin-top:10px">' + [7, 30, 90, 365].map((d) => '<button class="btn sm" data-extend="' + d + '">' + icon("plus") + d + ' ngày</button>').join("") + '</div>' +
+          // Key cũ (tạo trước khi có cột plan, hoặc gia hạn mà quên gán) lưu plan=NULL = không giới
+          // hạn lượt/ngày (xem quota.ts) — select này để gán/sửa lại plan cho đúng, đặc biệt khi
+          // gia hạn 1 key cũ để cấp lại cho người khác kích hoạt.
+          '<label class="field" style="margin-top:10px"><span>Loại KEY (giới hạn lượt/ngày)</span>' +
+          '<select class="input" id="plan-select">' +
+            ["", "d1", "trial", "d30", "d180", "d365", "forever"].map((p) =>
+              '<option value="' + p + '"' + ((l.plan || "") === p ? " selected" : "") + '>' +
+              (p === "" ? "— Không giới hạn (chưa gán) —" : esc(PLAN_LABELS[p] || p)) + '</option>'
+            ).join("") +
+          '</select></label></div>' +
         '<div class="section"><h3>Thiết bị</h3><div class="facts"><div class="fact"><span>Máy tính</span><b>' + (l.deviceBound ? esc(l.deviceName || "Máy tính") : "Chưa kích hoạt") + '</b>' +
           '<span>' + (l.lastSeenAt ? 'hoạt động ' + ago(l.lastSeenAt) : '—') + '</span></div></div></div>' +
         '<div class="section"><h3>Session Suno (client/session)</h3>' +
@@ -1057,6 +1067,11 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     if (copy) return copyKey(copy.dataset.key, copy);
     if (e.target.closest('[data-act="rotate"]')) return rotate(l);
     openDrawer(l.id);
+  });
+  $("#drawer").addEventListener("change", (e) => {
+    const l = find(selectedId);
+    if (!l || e.target.id !== "plan-select") return;
+    update(l.id, { plan: e.target.value || null }, 'Đã đổi loại KEY của "' + l.name + '"');
   });
   $("#drawer").addEventListener("click", async (e) => {
     const l = find(selectedId);

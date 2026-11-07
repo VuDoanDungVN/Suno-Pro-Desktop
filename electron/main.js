@@ -13,14 +13,13 @@ const { exec, execSync, spawn } = require('child_process');
 
 let mainWindow;
 
-// The app/project was renamed to "Suno Pro", but Electron's default
-// userData folder is derived from the app name — pinning it explicitly to
-// the OLD folder name keeps activation.json/trial.json/suno-session.json
-// exactly where they already were, so renaming never resets a saved Suno
-// session (or anything else) for anyone upgrading from the old build.
-app.setPath('userData', path.join(app.getPath('appData'), 'chicken-remastering'));
+// Thư mục userData khớp đúng tên app hiển thị ("Suno Pro") — tên nội bộ cũ
+// không liên quan tới tên hiển thị dễ bị vài phần mềm diệt virus coi là dấu
+// hiệu cố tình che tên. Khách đang dùng app (đã kích hoạt KEY) khi cập nhật
+// lên bản này sẽ bị mất session cục bộ — chỉ cần nhập lại KEY 1 lần.
+app.setPath('userData', path.join(app.getPath('appData'), 'suno-pro'));
 
-const previewDir = path.join(os.tmpdir(), 'chicken-mastering-preview');
+const previewDir = path.join(os.tmpdir(), 'suno-pro-preview');
 if (!fs.existsSync(previewDir)) {
   fs.mkdirSync(previewDir, { recursive: true });
 }
@@ -155,7 +154,7 @@ ipcMain.handle('save-file', async () => {
 // Save MP3 dialog (Easy / Normal / Hard one-click exports)
 ipcMain.handle('save-mp3', async () => {
   const result = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: 'chicken-mastered.mp3',
+    defaultPath: 'suno-pro-mastered.mp3',
     filters: [{ name: 'MP3 Audio', extensions: ['mp3'] }]
   });
   return result.filePath || null;
@@ -311,21 +310,21 @@ ipcMain.handle('activation-save', (event, payload) => {
 // Trial "sunoforfun" mở 72h tính từ lúc nhập mã. Chống gỡ-cài-lại bằng 3
 // anchor độc lập + đối chiếu chéo, lấy trạng thái xấu nhất:
 //   A) trial.json cạnh activation.json (exe dir + userData)
-//   B) Registry HKCU\Software\ChickenMastering (uninstaller không dọn)
-//   C) %ProgramData%\ChickenMastering\trial.dat (ngoài profile user)
+//   B) Registry HKCU\Software\SunoPro (uninstaller không dọn)
+//   C) %ProgramData%\SunoPro\trial.dat (ngoài profile user)
 // Gian lận (anchor lệch, vặn đồng hồ, clone sang máy khác) → khóa trial luôn.
 const TRIAL_HOURS = 7200;
 const TRIAL_MS = TRIAL_HOURS * 3600 * 1000;
-const TRIAL_REG_KEY = 'HKCU\\Software\\ChickenMastering';
+const TRIAL_REG_KEY = 'HKCU\\Software\\SunoPro';
 // macOS: anchor B tương đương, lưu qua `defaults` trong
 // ~/Library/Preferences/<domain>.plist — không nằm trong userData nên trình
 // gỡ cài qua kéo-vào-Thùng-rác không dọn theo.
-const TRIAL_MAC_DOMAIN = 'com.chickenmastering.trial';
+const TRIAL_MAC_DOMAIN = 'com.sunopro.trial';
 const TRIAL_SKEW_MS = 5 * 60 * 1000;
 
 function trialProgramDataFile() {
   const base = process.env.ProgramData || 'C:\\ProgramData';
-  return path.join(base, 'ChickenMastering', 'trial.dat');
+  return path.join(base, 'SunoPro', 'trial.dat');
 }
 
 // Mốc C, ngoài phạm vi userData của user — trên Windows là %ProgramData%
@@ -335,8 +334,8 @@ function trialProgramDataFile() {
 function trialProgramDataFiles() {
   if (process.platform === 'darwin') {
     return [
-      '/Library/Application Support/ChickenMastering/trial.dat',
-      path.join(os.homedir(), 'Library', 'Application Support', 'ChickenMastering', 'trial.dat')
+      '/Library/Application Support/SunoPro/trial.dat',
+      path.join(os.homedir(), 'Library', 'Application Support', 'SunoPro', 'trial.dat')
     ];
   }
   return [trialProgramDataFile()];
@@ -1079,7 +1078,7 @@ ipcMain.handle('suno-notify', (event, payload) => {
     const p = payload || {};
     if (!Notification.isSupported()) return { ok: false, error: 'Hệ thống không hỗ trợ toast' };
     const n = new Notification({
-      title: String(p.title || 'Chicken Mastering'),
+      title: String(p.title || 'Suno Pro'),
       body: String(p.body || '').slice(0, 400)
     });
     if (p.url && /^https:\/\//.test(String(p.url))) {
@@ -1405,10 +1404,16 @@ ipcMain.handle('suno-split-export', async (event, payload) => {
 ipcMain.handle('suno-studio-agent-step', async (event, payload) => {
   requireSunoProLicense();
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
-  const { studioUrl, session } = payload;
+  const { studioUrl, session, pitchSemitones } = payload;
   if (!studioUrl) throw new Error('Thiếu link Studio.');
   const { token, cookieHeader, deviceId } = await sunoResolveToken(session);
-  const res = await callSunoProWorker('/suno/studio/automate-reverse', { token, cookieHeader, deviceId, studioUrl });
+  const res = await callSunoProWorker('/suno/studio/automate-reverse', {
+    token,
+    cookieHeader,
+    deviceId,
+    studioUrl,
+    pitchSemitones: Number(pitchSemitones) || 0,
+  });
   // Worker trả `logs` kèm `ts` (thời điểm THẬT từng dòng xảy ra trên server) — ghi lại đúng mốc
   // đó thay vì giờ hiện tại, để debug.log phản ánh đúng diễn biến từng bước (không bị dồn cục
   // vào 1 thời điểm do cả quá trình chỉ trả kết quả về 1 lần duy nhất khi xong).
@@ -2534,7 +2539,7 @@ async function sunoGrabSessionFromBrowser(browser, wantedProfile) {
   // 1) Preferred: clone the cookie store into a temp profile and debug that —
   //    works on Chrome/Edge 136+, which refuse remote debugging on the real
   //    default profile.
-  const tmp = path.join(os.tmpdir(), `chicken-suno-profile-${Date.now()}`);
+  const tmp = path.join(os.tmpdir(), `suno-pro-profile-${Date.now()}`);
   const diskHasSuno = sunoProfileHasSunoCookies(cfg.userDataDir, profileName);
   try {
     sunoCopyProfileSubset(cfg.userDataDir, profileName, tmp);
@@ -2784,9 +2789,9 @@ ipcMain.handle('youtube-cancel', () => {
 
 app.whenReady().then(() => {
   // Give the window a stable Windows AppUserModelID so the taskbar groups
-  // under Chicken Mastering (and shows our icon) instead of Electron's.
+  // under Suno Pro (and shows our icon) instead of Electron's.
   if (process.platform === 'win32') {
-    app.setAppUserModelId('com.chicken.mastering');
+    app.setAppUserModelId('com.sunopro.app');
   }
   createWindow();
 });

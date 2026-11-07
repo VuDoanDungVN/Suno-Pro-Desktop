@@ -631,24 +631,26 @@ export async function studioInspect(request: Request, _env: Env): Promise<Respon
   return json({ title: proj.title || "", latestVersion: proj.latest_version_id || "", timing: state.timing || null, tracks });
 }
 
-/** `POST /suno/studio/automate-reverse { studioUrl }` — chạy TOÀN BỘ bước gửi lệnh AI Studio
- * (reverse + nhắc không cắt — nội dung nằm hẳn trong suno-studio-automation.ts, KHÔNG nhận từ
- * client) rồi Export → Full Song NGAY TRÊN SERVER bằng Cloudflare Browser Rendering. Trả thêm
- * `logs` để app ghi lại debug.log y như trước (không stream realtime được vì đây là 1 request
- * chờ tới khi xong). */
+/** `POST /suno/studio/automate-reverse { studioUrl, pitchSemitones? }` — chạy TOÀN BỘ bước gửi
+ * lệnh AI Studio (reverse + điền ô "Semitones" nếu pitchSemitones khác 0 — nội dung/selector nằm
+ * hẳn trong suno-studio-automation.ts, KHÔNG nhận từ client) rồi Export → Full Song NGAY TRÊN
+ * SERVER bằng Cloudflare Browser Rendering. Trả thêm `logs` để app ghi lại debug.log y như trước
+ * (không stream realtime được vì đây là 1 request chờ tới khi xong). */
 export async function studioAutomateReverse(request: Request, env: Env): Promise<Response> {
-  const body = await readJson<Record<string, unknown> & { studioUrl?: unknown }>(request);
+  const body = await readJson<Record<string, unknown> & { studioUrl?: unknown; pitchSemitones?: unknown }>(request);
   const session = readSession(body);
   const studioUrl = cleanText(body.studioUrl, 500);
   if (!studioUrl) throw new HttpError(400, "missing_fields", "Thiếu studioUrl.");
   if (!session.cookieHeader) throw new HttpError(400, "missing_cookie", "Thiếu cookie phiên Suno — kết nối lại Suno Connect.");
+  const pitchSemitonesRaw = typeof body.pitchSemitones === "number" ? body.pitchSemitones : Number(body.pitchSemitones);
+  const pitchSemitones = Number.isFinite(pitchSemitonesRaw) ? Math.max(-24, Math.min(24, Math.round(pitchSemitonesRaw))) : 0;
   // Kèm `ts` (thời điểm THẬT, ms epoch) cho mỗi dòng — vì cả quá trình chỉ trả kết quả về app
   // 1 LẦN DUY NHẤT khi xong (không stream realtime được), nếu không có mốc thời gian thật thì
   // app ghi lại debug.log sẽ bị dồn hết vào đúng 1 thời điểm, không phản ánh đúng diễn biến.
   const logs: Array<{ ts: number; line: string }> = [];
   const result = await runStudioReverseAutomation(
     env,
-    { cookieHeader: session.cookieHeader, studioUrl },
+    { cookieHeader: session.cookieHeader, studioUrl, pitchSemitones },
     (line) => logs.push({ ts: Date.now(), line }),
   );
   return json({ ...result, logs });

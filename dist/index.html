@@ -88,8 +88,8 @@
   <div id="activationOverlay" class="activation-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="activationTitle">
     <div class="activation-dialog">
       <div class="activation-head">
-        <img src="./assets/image-CpZRRbD0.png" alt="Chicken Mastering logo" class="activation-logo">
-        <h2 id="activationTitle">Kích hoạt Chicken Mastering</h2>
+        <img src="./assets/image-CpZRRbD0.png" alt="Suno Pro logo" class="activation-logo">
+        <h2 id="activationTitle">Kích hoạt Suno Pro</h2>
         <p class="activation-sub">Nhập mã kích hoạt để mở khóa ứng dụng.</p>
         <p id="actMode" class="activation-sub" aria-live="polite"></p>
       </div>
@@ -437,6 +437,22 @@
           <button id="sunoSplitLoad" class="suno-connect-btn suno-import-btn" title="Chọn file MP3 cần chia nhỏ"><span aria-hidden="true">＋</span> Chọn bài hát</button>
           <button id="openYoutubeBtn" class="suno-test-btn" type="button" title="Tải audio từ YouTube"><span aria-hidden="true">▶</span> YouTube</button>
           <button id="reversePipelineBtn" class="suno-test-btn" type="button" hidden title="Upload nguyên bài lên Studio (không cắt part), đảo chiều cục bộ trước khi upload, áp dụng lệnh AI cố định, render rồi tải về">⤵ Reverse</button>
+        </div>
+        <!-- Pitch áp dụng cho lần import/tải TIẾP THEO qua "Chọn bài hát"/"YouTube" (cả 1 file/link
+             và hàng đợi Nhiều file/Nhiều link) — xem window.__sunoPitchSemitones, áp dụng ở 2 nơi:
+             (1) pitchShiftAudioLocally() cục bộ TRƯỚC khi upload (chạy ngay trước
+             reverseAudioLocally() trong sunoRunReversePipeline, giữ nguyên giá trị người dùng
+             chọn); (2) gửi kèm nguyên giá trị đó qua api.sunoStudioAgentStep({ pitchSemitones }) —
+             server tự ĐẢO DẤU rồi điền vào ô "Semitones" của Suno Studio sau bước Reverse (xem
+             worker/src/suno-studio-automation.ts, theo đúng yêu cầu: chọn −2 ở đây thì ô Semitones
+             nhận +2). Pitch = 0 → bỏ qua cả 2, chạy như cũ. -->
+        <div class="suno-split-step-row" style="margin-top:8px;flex-direction:column;align-items:stretch;gap:4px;">
+          <span class="field-label-sm" style="margin:0;">Pitch :</span>
+          <div class="suno-split-step-row" style="gap:0;width:100%;">
+            <button id="sunoPitchMinusBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;border-radius:8px 0 0 8px;" title="Giảm Pitch 1 cung">−</button>
+            <button id="sunoPitchResetBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;border-radius:0;" title="Đặt lại Pitch = 0"><span id="sunoPitchValue">0</span></button>
+            <button id="sunoPitchPlusBtn" class="suno-test-btn suno-btn-ghost" type="button" style="flex:1;border-radius:0 8px 8px 0;" title="Tăng Pitch 1 cung">+</button>
+          </div>
         </div>
         <!-- Luôn đảo chiều (reverse) audio cục bộ trước khi upload — không còn là tuỳ chọn nữa,
              nên bỏ hẳn checkbox; xem reverseAudioLocally() luôn được gọi không điều kiện. -->
@@ -1994,28 +2010,28 @@
         function open() { modal.classList.remove('hidden'); load(); startAuto(); }
         function close() { modal.classList.add('hidden'); stopAuto(); }
         window.sunoCloseLogViewer = close;
-        // Mỗi lần bắt đầu 1 bài mới (Import/YouTube/hàng đợi — xem
-        // window.__sunoLogNeedsClear ở 3 chỗ phía trên), lần đầu mở popup
-        // này sau đó sẽ tự xoá log cũ trước khi hiện, để không còn lẫn log
-        // của bài trước — chỉ xoá ĐÚNG 1 LẦN cho tới khi có bài mới tiếp
-        // theo (mở lại nhiều lần trong cùng 1 bài không bị xoá giữa chừng).
-        function openAutoClearIfNeeded() {
-          if (window.__sunoLogNeedsClear && window.electronAPI && typeof window.electronAPI.debugLogClear === 'function') {
-            window.__sunoLogNeedsClear = false;
-            window.electronAPI.debugLogClear().then(open).catch(open);
-          } else {
-            open();
-          }
-        }
+        // Việc xoá log cũ khi bắt đầu 1 bài mới xảy ra NGAY lúc đó (xem
+        // window.sunoClearLogForNewRun ở 3 chỗ phía trên) — trước khi luồng
+        // kịp ghi dòng log đầu tiên. Bấm icon 🪵/☰ ở đây chỉ còn 1 việc: hiện
+        // NGAY log hiện có, không xoá/đợi gì thêm, nên không bao giờ mất log
+        // từ đầu luồng đang chạy.
         // Mở từ popup tiến trình (icon 🪵 trên popup Upload/Ghép/Xuất) — chỉ
         // MỞ THÊM popup log đè lên trên (z-index cao hơn), tuyệt đối không
         // đụng tới uploadConfirmModal bên dưới (không đóng, không reset
         // trạng thái, không ảnh hưởng tiến trình thật đang chạy).
-        window.sunoOpenLogViewer = openAutoClearIfNeeded;
+        window.sunoOpenLogViewer = open;
+        // Gọi ngay khi 1 bài mới BẮT ĐẦU (trước khi luồng ghi dòng log đầu
+        // tiên) — xoá xong thì mở popup log sau đó mới thấy đúng log của
+        // bài này từ dòng đầu, không còn lẫn log bài trước.
+        window.sunoClearLogForNewRun = function () {
+          if (window.electronAPI && typeof window.electronAPI.debugLogClear === 'function') {
+            window.electronAPI.debugLogClear().catch(function () {});
+          }
+        };
         var processLogBtn = document.getElementById('uploadConfirmLogBtn');
-        if (processLogBtn) processLogBtn.addEventListener('click', function (ev) { ev.stopPropagation(); openAutoClearIfNeeded(); });
+        if (processLogBtn) processLogBtn.addEventListener('click', function (ev) { ev.stopPropagation(); open(); });
 
-        if (menuBtn) menuBtn.addEventListener('click', function () { if (typeof closeDropdown === 'function') closeDropdown(); openAutoClearIfNeeded(); });
+        if (menuBtn) menuBtn.addEventListener('click', function () { if (typeof closeDropdown === 'function') closeDropdown(); open(); });
         if (closeBtn) closeBtn.addEventListener('click', close);
         if (refreshBtn) refreshBtn.addEventListener('click', load);
         if (copyBtn) copyBtn.addEventListener('click', function () {
@@ -3334,6 +3350,40 @@
       }
       scheduleResize();
 
+      // ── "Pitch": đổi tông bài hát trước khi đưa vào pipeline — chỉ ảnh hưởng lần
+      // import/tải kế tiếp qua "Chọn bài hát"/"YouTube" (đọc window.__sunoPitchSemitones
+      // tại thời điểm bấm, xem các lệnh gọi window.sunoRunReversePipeline bên dưới).
+      window.__sunoPitchSemitones = 0;
+      (function () {
+        // window.__sunoPitchSemitones vẫn lưu theo NỬA CUNG (semitone — đơn vị dùng xuyên suốt ở
+        // pitchShiftAudioLocally()/khi gửi lên server để điền ô "Semitones" Suno Studio), nhưng
+        // HIỂN THỊ + bước nhảy mỗi lần bấm −/+ tính theo CUNG (1 cung = 2 nửa cung): bấm 1 lần ra
+        // "1", bấm 2 lần ra "2"... Phạm vi cho phép là ±20 CUNG = ±40 nửa cung (PITCH_MIN/MAX lưu
+        // sẵn theo nửa cung để các chỗ dùng window.__sunoPitchSemitones khác không phải đổi gì).
+        var TONE_STEP = 2, PITCH_MIN = -20 * TONE_STEP, PITCH_MAX = 20 * TONE_STEP;
+        var minusBtn = document.getElementById('sunoPitchMinusBtn');
+        var resetBtn = document.getElementById('sunoPitchResetBtn');
+        var plusBtn = document.getElementById('sunoPitchPlusBtn');
+        var valueEl = document.getElementById('sunoPitchValue');
+        function render() {
+          var tones = window.__sunoPitchSemitones / TONE_STEP;
+          if (valueEl) valueEl.textContent = (tones > 0 ? '+' : '') + tones;
+        }
+        if (minusBtn) minusBtn.addEventListener('click', function () {
+          window.__sunoPitchSemitones = Math.max(PITCH_MIN, window.__sunoPitchSemitones - TONE_STEP);
+          render();
+        });
+        if (plusBtn) plusBtn.addEventListener('click', function () {
+          window.__sunoPitchSemitones = Math.min(PITCH_MAX, window.__sunoPitchSemitones + TONE_STEP);
+          render();
+        });
+        if (resetBtn) resetBtn.addEventListener('click', function () {
+          window.__sunoPitchSemitones = 0;
+          render();
+        });
+        render();
+      })();
+
       // ── "Import": feed any local audio file into the existing Suno
       // Split-Studio load pipeline exactly as if the user had picked it
       // via the file dialog — never reimplements that logic, just drives
@@ -3392,9 +3442,9 @@
           var originalBaseName = queueBaseName(filePath.split(/[\\/]/).pop());
           var desiredBaseName = album.name + ' - ' + originalBaseName;
           window.sunoCurrentSongTitle = desiredBaseName; // tên SẠCH — dùng cho songsAdd/hiển thị, không dính tiền tố
-          window.__sunoLogNeedsClear = true; // bài mới bắt đầu — xem icon 🪵/☰ bên dưới, log cũ sẽ bị xoá ở lần mở tiếp theo
+          if (typeof window.sunoClearLogForNewRun === 'function') window.sunoClearLogForNewRun(); // bài mới bắt đầu — xoá log cũ ngay, log mới ghi từ dòng đầu
           if (typeof window.sunoRunReversePipeline === 'function') {
-            window.sunoRunReversePipeline(filePath, { title: desiredBaseName, registerSong: true, sourceLabel: 'Chọn bài hát' });
+            window.sunoRunReversePipeline(filePath, { title: desiredBaseName, registerSong: true, sourceLabel: 'Chọn bài hát', pitchSemitones: window.__sunoPitchSemitones });
             return;
           }
           if (typeof window.electronAPI.prepareImportTitle !== 'function') {
@@ -3625,12 +3675,12 @@
               var album = window.sunoCurrentAlbum;
               var desiredBaseName = album ? (album.name + ' - ' + ytCurrentInfo.title) : ytCurrentInfo.title;
               window.sunoCurrentSongTitle = desiredBaseName; // tên SẠCH — dùng cho songsAdd/hiển thị
-              window.__sunoLogNeedsClear = true; // bài mới bắt đầu — xem icon 🪵/☰ bên dưới, log cũ sẽ bị xoá ở lần mở tiếp theo
+              if (typeof window.sunoClearLogForNewRun === 'function') window.sunoClearLogForNewRun(); // bài mới bắt đầu — xoá log cũ ngay, log mới ghi từ dòng đầu
               if (window.electronAPI && typeof window.electronAPI.debugLog === 'function') {
                 window.electronAPI.debugLog('[yt-check] typeof sunoRunReversePipeline = ' + (typeof window.sunoRunReversePipeline));
               }
               if (typeof window.sunoRunReversePipeline === 'function') {
-                window.sunoRunReversePipeline(result.path, { title: desiredBaseName, registerSong: true, sourceLabel: 'YouTube' });
+                window.sunoRunReversePipeline(result.path, { title: desiredBaseName, registerSong: true, sourceLabel: 'YouTube', pitchSemitones: window.__sunoPitchSemitones });
               } else if (window.electronAPI && typeof window.electronAPI.prepareImportTitle === 'function') {
                 window.electronAPI.prepareImportTitle({ sourcePath: result.path, desiredBaseName: '_part ' + desiredBaseName }).then(function (renamed) {
                   importFileAsIfPicked(renamed.path);
@@ -3843,13 +3893,14 @@
             var album = window.sunoCurrentAlbum;
             var desiredBaseName = album ? (album.name + ' - ' + item.label) : item.label;
             window.sunoCurrentSongTitle = desiredBaseName; // tên SẠCH — dùng cho songsAdd/hiển thị
-            window.__sunoLogNeedsClear = true; // bài mới bắt đầu — xem icon 🪵/☰ bên dưới, log cũ sẽ bị xoá ở lần mở tiếp theo
+            if (typeof window.sunoClearLogForNewRun === 'function') window.sunoClearLogForNewRun(); // bài mới bắt đầu — xoá log cũ ngay, log mới ghi từ dòng đầu
             if (typeof window.sunoRunReversePipeline === 'function') {
               window.sunoRunReversePipeline(filePath, {
                 title: desiredBaseName,
                 registerSong: true,
                 isQueueItem: true,
                 sourceLabel: 'Hàng đợi',
+                pitchSemitones: window.__sunoPitchSemitones,
                 onPhase: function (text) { item.phase = text; renderQueue(); }
               }).then(function (result) {
                 item.state = result.ok ? 'done' : 'failed';
@@ -5463,6 +5514,193 @@
       return result;
     }
 
+    // ── Pitch shift (nửa cung, giữ nguyên tempo) — phase vocoder tự viết (không phụ
+    // thuộc thư viện ngoài, chỉ cần FFT cục bộ): resample theo tỉ lệ pitch rồi time-stretch
+    // ngược lại bằng phase vocoder để độ dài bài hát không đổi. Dùng cho khối "Pitch :" ở
+    // màn hình chính, chạy trước reverseAudioLocally() trong sunoRunReversePipeline.
+    function nextPow2(n) { var p = 1; while (p < n) p *= 2; return p; }
+
+    function fftInPlace(re, im, invert) {
+      var n = re.length;
+      for (var i = 1, j = 0; i < n; i++) {
+        var bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+          var tr = re[i]; re[i] = re[j]; re[j] = tr;
+          var ti = im[i]; im[i] = im[j]; im[j] = ti;
+        }
+      }
+      for (var len = 2; len <= n; len <<= 1) {
+        var ang = (invert ? 1 : -1) * 2 * Math.PI / len;
+        var wr = Math.cos(ang), wi = Math.sin(ang);
+        for (var start = 0; start < n; start += len) {
+          var curWr = 1, curWi = 0;
+          for (var k = 0; k < len / 2; k++) {
+            var uRe = re[start + k], uIm = im[start + k];
+            var vRe = re[start + k + len / 2] * curWr - im[start + k + len / 2] * curWi;
+            var vIm = re[start + k + len / 2] * curWi + im[start + k + len / 2] * curWr;
+            re[start + k] = uRe + vRe;
+            im[start + k] = uIm + vIm;
+            re[start + k + len / 2] = uRe - vRe;
+            im[start + k + len / 2] = uIm - vIm;
+            var nextWr = curWr * wr - curWi * wi;
+            var nextWi = curWr * wi + curWi * wr;
+            curWr = nextWr; curWi = nextWi;
+          }
+        }
+      }
+      if (invert) {
+        for (var m = 0; m < n; m++) { re[m] /= n; im[m] /= n; }
+      }
+    }
+
+    function phaseVocoderTimeStretch(input, stretch, fftSize) {
+      fftSize = fftSize || 2048;
+      var hopA = fftSize / 4;
+      var hopS = Math.max(1, Math.round(hopA * stretch));
+      var win = new Float32Array(fftSize);
+      for (var i = 0; i < fftSize; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (fftSize - 1));
+      var outLen = Math.ceil(input.length * stretch) + fftSize;
+      var output = new Float32Array(outLen);
+      var normBuf = new Float32Array(outLen);
+      var numFrames = Math.max(0, Math.floor((input.length - fftSize) / hopA));
+      var halfBins = fftSize / 2;
+      var lastPhase = new Float32Array(halfBins + 1);
+      var sumPhase = new Float32Array(halfBins + 1);
+      var re = new Float32Array(fftSize), im = new Float32Array(fftSize);
+      var omega = new Float32Array(halfBins + 1);
+      for (var k = 0; k <= halfBins; k++) omega[k] = 2 * Math.PI * k / fftSize;
+
+      for (var f = 0; f <= numFrames; f++) {
+        var inStart = f * hopA;
+        for (var n = 0; n < fftSize; n++) {
+          var s = inStart + n < input.length ? input[inStart + n] : 0;
+          re[n] = s * win[n];
+          im[n] = 0;
+        }
+        fftInPlace(re, im, false);
+        for (var k2 = 0; k2 <= halfBins; k2++) {
+          var mag = Math.sqrt(re[k2] * re[k2] + im[k2] * im[k2]);
+          var phase = Math.atan2(im[k2], re[k2]);
+          var delta = phase - lastPhase[k2];
+          lastPhase[k2] = phase;
+          delta -= omega[k2] * hopA;
+          delta = delta - 2 * Math.PI * Math.round(delta / (2 * Math.PI));
+          var trueFreq = omega[k2] + delta / hopA;
+          sumPhase[k2] += trueFreq * hopS;
+          var outPhase = sumPhase[k2];
+          re[k2] = mag * Math.cos(outPhase);
+          im[k2] = mag * Math.sin(outPhase);
+          if (k2 > 0 && k2 < halfBins) {
+            re[fftSize - k2] = re[k2];
+            im[fftSize - k2] = -im[k2];
+          }
+        }
+        fftInPlace(re, im, true);
+        var outStart = f * hopS;
+        for (var n2 = 0; n2 < fftSize; n2++) {
+          if (outStart + n2 >= outLen) break;
+          output[outStart + n2] += re[n2] * win[n2];
+          normBuf[outStart + n2] += win[n2] * win[n2];
+        }
+      }
+      for (var p = 0; p < outLen; p++) {
+        if (normBuf[p] > 1e-6) output[p] /= normBuf[p];
+      }
+      var finalLen = Math.max(1, Math.round(input.length * stretch));
+      return output.subarray(0, finalLen);
+    }
+
+    function resampleLinear(input, outLength) {
+      var out = new Float32Array(outLength);
+      if (input.length < 2 || outLength < 2) {
+        for (var z = 0; z < outLength; z++) out[z] = input[Math.min(input.length - 1, z)] || 0;
+        return out;
+      }
+      var ratio = (input.length - 1) / (outLength - 1);
+      for (var i = 0; i < outLength; i++) {
+        var pos = i * ratio;
+        var i0 = Math.floor(pos);
+        var i1 = Math.min(input.length - 1, i0 + 1);
+        var frac = pos - i0;
+        out[i] = input[i0] * (1 - frac) + input[i1] * frac;
+      }
+      return out;
+    }
+
+    // ratio > 1 = tăng tông (pitch cao hơn), ratio < 1 = giảm tông — time-stretch theo
+    // ratio (giữ pitch gốc, đổi độ dài) rồi resample ngược lại đúng số sample ban đầu
+    // (đổi "tốc độ phát" → đổi pitch theo ratio, độ dài trở về như cũ).
+    function pitchShiftChannel(data, semitones) {
+      var ratio = Math.pow(2, semitones / 12);
+      var stretched = phaseVocoderTimeStretch(data, ratio, 2048);
+      return resampleLinear(stretched, data.length);
+    }
+
+    function pitchShiftAudioBuffer(audioBuffer, semitones) {
+      var numChannels = audioBuffer.numberOfChannels;
+      var length = audioBuffer.length;
+      var out = new AudioBuffer({ length: length, numberOfChannels: numChannels, sampleRate: audioBuffer.sampleRate });
+      for (var ch = 0; ch < numChannels; ch++) {
+        var shifted = pitchShiftChannel(audioBuffer.getChannelData(ch), semitones);
+        out.copyToChannel(shifted.subarray(0, length), ch);
+      }
+      return out;
+    }
+
+    function encodePlainMp3(audioBuffer) {
+      var numChannels = Math.min(2, audioBuffer.numberOfChannels);
+      var sampleRate = audioBuffer.sampleRate;
+      var numFrames = audioBuffer.length;
+      var pcm = [];
+      for (var c = 0; c < numChannels; c++) {
+        var src = audioBuffer.getChannelData(c);
+        var out = new Int16Array(numFrames);
+        for (var i = 0; i < numFrames; i++) {
+          var sample = Math.max(-1, Math.min(1, src[i]));
+          out[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+        }
+        pcm.push(out);
+      }
+      var kbps = 192;
+      var encoder = new lamejs.Mp3Encoder(numChannels, sampleRate, kbps);
+      var blockSize = 1152;
+      var mp3Chunks = [];
+      for (var i2 = 0; i2 < numFrames; i2 += blockSize) {
+        var left = pcm[0].subarray(i2, i2 + blockSize);
+        var right = numChannels > 1 ? pcm[1].subarray(i2, i2 + blockSize) : undefined;
+        var chunk = encoder.encodeBuffer(left, right);
+        if (chunk && chunk.length > 0) mp3Chunks.push(chunk);
+      }
+      var endChunk = encoder.flush();
+      if (endChunk && endChunk.length > 0) mp3Chunks.push(endChunk);
+      var totalLen = mp3Chunks.reduce(function (sum, c) { return sum + c.length; }, 0);
+      var result = new Uint8Array(totalLen);
+      var pos = 0;
+      for (var k = 0; k < mp3Chunks.length; k++) { result.set(mp3Chunks[k], pos); pos += mp3Chunks[k].length; }
+      return result;
+    }
+
+    function pitchShiftAudioLocally(bytes, semitones) {
+      if (!semitones) return Promise.resolve({ bytes: bytes, filename: null });
+      if (typeof lamejs === 'undefined' || !lamejs.Mp3Encoder) {
+        return Promise.reject(new Error('Không nạp được thư viện mã hoá MP3 (lamejs) — thử khởi động lại app.'));
+      }
+      var uint8 = new Uint8Array(bytes);
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      var ctx = new AudioCtx();
+      return ctx.decodeAudioData(uint8.buffer).then(function (audioBuffer) {
+        var shiftedBuffer = pitchShiftAudioBuffer(audioBuffer, semitones);
+        var mp3Bytes = encodePlainMp3(shiftedBuffer);
+        ctx.close();
+        return { bytes: Array.from(mp3Bytes), filename: 'pitch-shifted-audio.mp3' };
+      }, function (err) {
+        ctx.close();
+        throw new Error('Không đổi tông được audio cục bộ: ' + (err && err.message ? err.message : String(err)));
+      });
+    }
+
     function reverseAudioLocally(bytes) {
       if (typeof lamejs === 'undefined' || !lamejs.Mp3Encoder) {
         return Promise.reject(new Error('Không nạp được thư viện mã hoá MP3 (lamejs) — thử khởi động lại app.'));
@@ -5676,8 +5914,10 @@
         return step(name, statusText, fn);
       }
 
-      logLine('——— Bắt đầu pipeline Reverse (' + (opts.sourceLabel || 'Import') + ') cho file: ' + filePath + ' ———');
-      showReverseRunning(title, 8, opts.isQueueItem);
+      var pitchSemitones = Number(opts.pitchSemitones) || 0;
+      var pitchTones = pitchSemitones / 2; // hiển thị theo CUNG — xem khối Pitch UI phía trên
+      logLine('——— Bắt đầu pipeline Reverse (' + (opts.sourceLabel || 'Import') + ') cho file: ' + filePath + ' ———' + (pitchSemitones ? (' [Pitch ' + (pitchTones > 0 ? '+' : '') + pitchTones + ']') : ''));
+      showReverseRunning(title, pitchSemitones ? 9 : 8, opts.isQueueItem);
 
       return stepQ('Đọc file + session', 'Đang đọc file…', function () {
         return Promise.all([getSession(), readDuration(filePath), api.readAudioFile(filePath)]);
@@ -5688,11 +5928,19 @@
           var bytes = res[2];
           var uploadFilename = filePath.split(/[\\/]/).pop();
           logLine('Thời lượng file gốc: ' + duration.toFixed(2) + 's');
-          return stepQ('Reverse audio trước khi upload', 'Đang đảo chiều audio cục bộ…', function () {
-            return reverseAudioLocally(bytes).then(function (result) {
+          var pitchStep = !pitchSemitones ? Promise.resolve() : stepQ('Đổi tông audio trước khi upload', 'Đang đổi tông (' + (pitchTones > 0 ? '+' : '') + pitchTones + ' cung)…', function () {
+            return pitchShiftAudioLocally(bytes, pitchSemitones).then(function (result) {
               bytes = result.bytes;
-              uploadFilename = result.filename;
-              logLine('Đã đảo chiều audio cục bộ, sẽ upload file: ' + uploadFilename);
+              logLine('Đã đổi tông audio cục bộ: ' + (pitchTones > 0 ? '+' : '') + pitchTones + ' cung');
+            });
+          });
+          return pitchStep.then(function () {
+            return stepQ('Reverse audio trước khi upload', 'Đang đảo chiều audio cục bộ…', function () {
+              return reverseAudioLocally(bytes).then(function (result) {
+                bytes = result.bytes;
+                uploadFilename = result.filename;
+                logLine('Đã đảo chiều audio cục bộ, sẽ upload file: ' + uploadFilename);
+              });
             });
           }).then(function () {
             return stepQ('Upload nguyên bài lên Suno', 'Đang upload nguyên bài lên Suno…', function () {
@@ -5737,7 +5985,7 @@
                 logLine('⚠ Inspect sau ghép lỗi (bỏ qua, chỉ để chẩn đoán): ' + cleanErrorMessage(e));
               }).then(function () {
                 return stepQ('Gửi lệnh cho AI Studio', 'Đang xử lý trên server (gửi lệnh AI + lưu)…', function () {
-                  return api.sunoStudioAgentStep({ studioUrl: studioUrl, session: session });
+                  return api.sunoStudioAgentStep({ studioUrl: studioUrl, session: session, pitchSemitones: pitchSemitones });
                 }).catch(function (e) {
                   logLine('⚠ Gửi lệnh AI Studio lỗi (bỏ qua, vẫn tiếp tục render): ' + cleanErrorMessage(e));
                 });

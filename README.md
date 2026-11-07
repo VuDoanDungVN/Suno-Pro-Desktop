@@ -62,9 +62,9 @@ bản app phát hành cho khách không còn chứa các đoạn này.
   thái dùng thử (trial) offline cũ.
 - `dist/index.html` — giao diện renderer (đã build sẵn, nạp trực tiếp khi đóng
   gói; khi chạy dev không có `dist/` sẽ fallback sang `http://localhost:5173`).
-- userData của app được cố định về thư mục cũ (`chicken-remastering`) dù app đã
-  đổi tên thành "Suno Pro", để không làm mất `activation.json`/`trial.json`/
-  `suno-session.json` của người dùng đang nâng cấp từ bản cũ.
+- userData của app cố định về thư mục `suno-pro` (`app.setPath('userData', ...)`
+  trong `electron/main.js`) — nơi lưu `activation.json`/`trial.json`/
+  `suno-session.json`.
 
 Session Suno (JWT/cookie) do chính người dùng tự đăng nhập Suno rồi dán vào app —
 Worker chỉ chuyển tiếp hộ, không lưu trữ hay chia sẻ cho bên thứ ba.

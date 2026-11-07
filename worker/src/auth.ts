@@ -794,8 +794,12 @@ export async function appVersionCheck(env: Env): Promise<Response> {
   return json({ latestVersion, downloadUrlWin, downloadUrlMac });
 }
 
-/** `PATCH /admin/licenses/:id { name?, email?, note?, status?, expiresAt?, extendDays? }`
- * `extendDays` cộng dồn vào hạn hiện có (hoặc từ bây giờ nếu key vĩnh viễn/đã hết hạn). */
+/** `PATCH /admin/licenses/:id { name?, email?, note?, status?, expiresAt?, extendDays?, plan? }`
+ * `extendDays` cộng dồn vào hạn hiện có (hoặc từ bây giờ nếu key vĩnh viễn/đã hết hạn). `plan` dùng
+ * để gán/sửa lại loại KEY cho các key cũ đang lưu NULL (tạo trước khi có tính năng giới hạn lượt —
+ * xem DAILY_LIMITS trong quota.ts, NULL bị coi là "không giới hạn") — ví dụ khi gia hạn 1 key cũ để
+ * cấp lại cho người khác kích hoạt, cần gán đúng plan thì giới hạn lượt/ngày mới áp dụng. Gửi
+ * `plan: null` để xoá về "không giới hạn" (cố ý, cho các key đặc biệt). */
 export async function adminUpdate(request: Request, env: Env, id: string): Promise<Response> {
   const body = await readJson<Record<string, unknown>>(request);
   const fields: Record<string, unknown> = {};
@@ -804,6 +808,10 @@ export async function adminUpdate(request: Request, env: Env, id: string): Promi
   if ("note" in body) fields.note = cleanText(body.note, 500);
   if (body.status === "active" || body.status === "revoked") fields.status = body.status;
   if ("expiresAt" in body) fields.expires_at = typeof body.expiresAt === "number" ? body.expiresAt : null;
+  if ("plan" in body) {
+    const planInput = typeof body.plan === "string" ? body.plan : null;
+    fields.plan = planInput && VALID_PLANS.has(planInput) ? planInput : null;
+  }
   if (typeof body.extendDays === "number" && body.extendDays > 0) {
     const current = await getLicense(env, id);
     const base = current.expires_at && current.expires_at > now() ? current.expires_at : now();
