@@ -274,7 +274,7 @@ export async function runStudioReverseAutomation(
       return settledNow;
     };
 
-    const settledByPoll1 = await sendAndWait(FIXED_PROMPT, 20000, 'lệnh 1/2 — reverse');
+    const settledByPoll1 = await sendAndWait(FIXED_PROMPT, 25000, 'lệnh 1/2 — reverse');
     const settledByPoll2 = await sendAndWait(FOLLOWUP_PROMPT, 10000, 'lệnh 2/2 — nhắc không cắt');
     const settledByPoll = settledByPoll1 && settledByPoll2;
 

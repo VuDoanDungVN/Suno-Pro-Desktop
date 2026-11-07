@@ -18,6 +18,7 @@ const DAILY_LIMITS: Record<string, { upload: number | null; generate: number | n
   d1: { upload: 3, generate: 3 },
   trial: { upload: 30, generate: 30 },
   d30: { upload: 60, generate: 60 },
+  d180: { upload: null, generate: null },
   d365: { upload: null, generate: null },
   forever: { upload: null, generate: null },
 };

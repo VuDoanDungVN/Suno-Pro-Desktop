@@ -7,6 +7,7 @@
 
 import { svgQrCode, svgQrDataUrl } from "./qr";
 import { metaGet } from "./auth";
+import { LOGO_PNG_BASE64 } from "./logo-base64";
 
 /** Link mặc định nếu chưa từng đặt qua admin (`POST /admin/download-url { platform, url }`) — sau
  * khi đặt 1 lần, trang này luôn ưu tiên đọc giá trị trong bảng `meta`, đổi link ở admin có hiệu
@@ -23,13 +24,12 @@ const PAGE_KEYWORDS =
   "tự động hoá Suno AI, KEY dùng thử Suno Pro, tải Suno Pro, Suno Pro Desktop, ứng dụng Suno Pro Mac Windows";
 
 /** Ảnh PNG cho thẻ og:image/twitter:image — Facebook/Zalo... không render SVG làm thumbnail, nên
- * endpoint này proxy hộ 1 ảnh QR PNG (cùng nội dung link nhóm Zalo) từ dịch vụ ảnh QR miễn phí
- * api.qrserver.com, trả về qua domain của mình để link ảnh ổn định + cache được. */
+ * endpoint này trả logo app (nhúng sẵn base64, xem logo-base64.ts) thay vì fetch ảnh ngoài. */
 export async function guideOgImage(): Promise<Response> {
-  const src = `https://api.qrserver.com/v1/create-qr-code/?size=630x630&margin=10&data=${encodeURIComponent(ZALO_URL)}`;
-  const res = await fetch(src);
-  const body = await res.arrayBuffer();
-  return new Response(body, {
+  const binary = atob(LOGO_PNG_BASE64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Response(bytes, {
     headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" },
   });
 }
@@ -56,9 +56,9 @@ export async function guidePageHtml(env: Env): Promise<Response> {
 <meta property="og:description" content="${PAGE_DESC}">
 <meta property="og:url" content="${BASE_URL}/huong-dan">
 <meta property="og:image" content="${BASE_URL}/huong-dan/og-image.png">
-<meta property="og:image:width" content="630">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Mã QR tham gia nhóm Zalo Suno Pro Support">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta property="og:image:alt" content="Logo Suno Pro">
 <meta property="og:locale" content="vi_VN">
 <!-- Twitter/X Card -->
 <meta name="twitter:card" content="summary_large_image">

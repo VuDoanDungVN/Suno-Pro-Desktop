@@ -92,10 +92,12 @@ export async function createCheckout(request: Request, env: Env): Promise<Respon
   const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
   await checkRateLimit(env, ip);
 
-  const body = await readJson<{ plan?: unknown; email?: unknown }>(request);
+  const body = await readJson<{ plan?: unknown; email?: unknown; name?: unknown }>(request);
   const planKey = cleanText(body.plan, 40);
   const email = cleanEmail(body.email);
+  const name = cleanText(body.name, 120);
   if (!email) throw new HttpError(400, "bad_email", "Hãy nhập đúng địa chỉ email để nhận KEY.");
+  if (!name) throw new HttpError(400, "bad_name", "Hãy nhập tên của bạn.");
   const plans = stripePlans(env);
   const plan = planKey ? plans[planKey] : null;
   if (!planKey || !plan) throw new HttpError(400, "bad_plan", "Gói không hợp lệ.");
@@ -121,9 +123,9 @@ export async function createCheckout(request: Request, env: Env): Promise<Respon
   });
 
   await env.DB.prepare(
-    `INSERT INTO stripe_orders (id, plan, email, status, amount_cents, currency, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)`,
+    `INSERT INTO stripe_orders (id, plan, email, name, status, amount_cents, currency, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
   )
-    .bind(session.id, planKey, email, session.amount_total ?? null, session.currency ?? null, now(), now())
+    .bind(session.id, planKey, email, name, session.amount_total ?? null, session.currency ?? null, now(), now())
     .run();
 
   return json({ url: session.url });
@@ -235,12 +237,12 @@ async function fulfillOrder(env: Env, sessionId: string | undefined): Promise<vo
     .run();
   if ((claim.meta?.changes ?? 0) === 0) return; // đã xử lý rồi, hoặc đơn không tồn tại — bỏ qua
 
-  const order = await env.DB.prepare("SELECT plan, email FROM stripe_orders WHERE id = ?").bind(sessionId).first<{ plan: string; email: string }>();
+  const order = await env.DB.prepare("SELECT plan, email, name FROM stripe_orders WHERE id = ?").bind(sessionId).first<{ plan: string; email: string; name: string | null }>();
   if (!order) return;
   const plan = stripePlans(env)[order.plan];
   try {
     const { id: licenseId, key } = await issueLicense(env, {
-      name: order.email,
+      name: order.name || order.email,
       email: order.email,
       note: `Mua qua Stripe — gói "${plan?.label ?? order.plan}"`,
       days: plan?.days ?? null,

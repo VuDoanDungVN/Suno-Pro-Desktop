@@ -538,12 +538,13 @@ export async function adminList(env: Env): Promise<Response> {
 /** `plan` quyết định giới hạn lượt upload/tạo nhạc trong ngày (xem src/quota.ts) — PHẢI khớp
  * đúng với thời hạn thật của KEY, không tin tưởng mù vào giá trị `plan` admin gửi lên: validate
  * lại ở đây ("1 ngày"/"30 ngày"/"1 năm" đúng số ngày; "vĩnh viễn" không hạn). */
-const VALID_PLANS = new Set(["d1", "d30", "d365", "forever"]);
+const VALID_PLANS = new Set(["d1", "d30", "d180", "d365", "forever"]);
 
 /** `POST /admin/licenses { name, email?, note?, days?, plan? }` → trả KEY gốc.
  * `days` có tác dụng khi > 0 — bỏ trống = vĩnh viễn.
- * `plan`: 'd1' (1 ngày) | 'd30' (30 ngày) | 'd365' (365 ngày) | 'forever' (vĩnh viễn) — bỏ
- * trống hoặc không khớp thời hạn thật thì lưu NULL (= không giới hạn lượt, coi như KEY đặc biệt). */
+ * `plan`: 'd1' (1 ngày) | 'd30' (30 ngày) | 'd180' (6 tháng) | 'd365' (365 ngày) | 'forever'
+ * (vĩnh viễn) — bỏ trống hoặc không khớp thời hạn thật thì lưu NULL (= không giới hạn lượt, coi
+ * như KEY đặc biệt). */
 export async function adminCreate(request: Request, env: Env): Promise<Response> {
   const body = await readJson<{ name?: unknown; email?: unknown; note?: unknown; days?: unknown; plan?: unknown }>(request);
   const name = cleanText(body.name, 120) ?? "Khách hàng";
@@ -557,6 +558,7 @@ export async function adminCreate(request: Request, env: Env): Promise<Response>
   // "days: 30" (hoặc ngược lại) do bug/giả mạo request, dẫn tới giới hạn sai hẳn với thời hạn thật.
   if (plan === "d1" && days !== 1) plan = null;
   if (plan === "d30" && days !== 30) plan = null;
+  if (plan === "d180" && days !== 180) plan = null;
   if (plan === "d365" && days !== 365) plan = null;
   if (plan === "forever" && durationMs !== null) plan = null;
   const { key, hash, hint, enc } = await newKey(env);
@@ -673,10 +675,10 @@ export async function issueLicense(
   opts: { name: string; email: string; note?: string | null; days: number | null },
 ): Promise<{ id: string; key: string }> {
   const durationMs = opts.days === null ? null : opts.days * DAY_MS;
-  // Chỉ 2 gói đang bán qua Stripe (30d/365d, xem stripe.ts) khớp đúng 1 trong 2 plan có giới hạn
-  // cố định — gói nào khác (hoặc vĩnh viễn) thì để NULL (vĩnh viễn = không giới hạn sẵn rồi, nên
-  // không cần gán 'forever' riêng ở đây).
-  const plan = opts.days === 30 ? "d30" : opts.days === 365 ? "d365" : null;
+  // Khớp với các gói đang bán qua Stripe (xem stripePlans() trong stripe.ts) có giới hạn quota
+  // cố định (xem DAILY_LIMITS trong quota.ts) — gói nào khác (7 ngày, hoặc vĩnh viễn) thì để NULL
+  // (vĩnh viễn = không giới hạn sẵn rồi, nên không cần gán 'forever' riêng ở đây).
+  const plan = opts.days === 30 ? "d30" : opts.days === 180 ? "d180" : opts.days === 365 ? "d365" : null;
   const { key, hash, hint, enc } = await newKey(env);
   const id = crypto.randomUUID();
   const t = now();

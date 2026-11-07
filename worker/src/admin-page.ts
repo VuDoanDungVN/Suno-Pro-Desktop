@@ -83,19 +83,107 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; }
 .login-card .brand .mark svg { width: 26px; height: 26px; }
 .login-error { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius-sm);
   background: rgb(255 138 138 / 9%); border: 1px solid rgb(255 138 138 / 35%); color: #ffc2c2; font-size: 13px; }
+.login-success { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgb(45 212 191 / 9%); border: 1px solid rgb(45 212 191 / 35%); color: var(--ok); font-size: 13px; }
+.login-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--muted); margin-top: -4px; }
+.login-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.login-row a { font-weight: 600; }
+#login-password-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); height: 32px; }
 .login-foot { text-align: center; color: var(--faint); font-size: 12px; }
+.login-foot a { font-weight: 600; }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px; padding: 12px 28px;
   background: rgb(18 21 27 / 82%); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 .topbar .spacer { flex: 1; }
 .who-pill { display: inline-flex; align-items: center; gap: 7px; max-width: 280px; height: 30px; padding: 0 12px; border-radius: 999px;
   border: 1px solid var(--line); color: var(--muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .who-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgb(45 212 191 / 18%); flex: none; }
+/* Khung admin: sidebar cố định bên trái + nội dung cuộn riêng bên phải — bố cục giống trang quản
+ * trị tham khảo, giữ nguyên toàn bộ màu sắc/biến CSS hiện có của Suno Pro. */
+.shell { display: flex; min-height: 100vh; align-items: stretch; }
+.sidebar { width: 240px; flex: none; background: var(--bg-2); border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
+.sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 16px; font-weight: 700; letter-spacing: -.2px; }
+.sidebar-brand .mark { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: var(--on-primary); box-shadow: 0 8px 20px -10px rgb(31 181 181 / 70%); }
+.sidebar-brand .mark svg { width: 18px; height: 18px; fill: currentColor; stroke: none; }
+.sidebar-brand small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; letter-spacing: 0; }
+.sidebar-nav { flex: 1; padding: 10px; }
+.sidebar-link { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; color: var(--muted);
+  text-decoration: none; font-weight: 650; font-size: 13.5px; }
+.sidebar-link svg { width: 17px; height: 17px; flex: none; }
+.sidebar-link.active { background: var(--card-2); color: var(--text); box-shadow: 0 0 0 1px var(--primary) inset; }
+.sidebar-bottom { padding: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.sidebar-bottom .who-pill { width: 100%; justify-content: center; }
+.sidebar-bottom .btn { width: 100%; }
+.shell .page { flex: 1; min-width: 0; overflow-y: auto; }
+/* Mobile: sidebar thu lại thành thanh trên cùng (brand + làm mới/đăng xuất), còn 2 mục menu
+ * chuyển xuống làm bottom tab bar cố định đáy màn hình — kiểu app di động. */
+@media (max-width: 760px) {
+  .shell { flex-direction: column; }
+  .sidebar { position: static; width: 100%; height: auto; flex-direction: row; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .sidebar-brand { padding: 0; }
+  .sidebar-bottom { flex-direction: row; border-top: 0; padding: 0; flex: none; }
+  .sidebar-bottom .who-pill { display: none; }
+  .sidebar-bottom .lbl { display: none; }
+  .sidebar-bottom .btn { width: auto; padding: 0 10px; }
+
+  .sidebar-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; gap: 4px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-2); border-top: 1px solid var(--line); box-shadow: 0 -8px 20px -16px rgb(0 0 0 / 60%); }
+  .sidebar-link { flex: 1; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 2px; border-radius: 10px; font-size: 11px; text-align: center; }
+  .sidebar-link svg { width: 20px; height: 20px; }
+  .sidebar-link .lbl { font-size: 10.5px; white-space: nowrap; }
+  .sidebar-link.active { box-shadow: none; }
+
+  .shell .page { padding-bottom: 78px; }
+}
+
 .page { max-width: 1280px; margin: 0 auto; padding: 26px 28px 60px; }
-.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
-.page-head h1 { margin: 0; font-size: 24px; letter-spacing: -.4px; }
-.page-head p { margin: 4px 0 0; color: var(--muted); }
-.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
-.kpi { padding: 14px 16px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); display: grid; gap: 6px; }
+
+/* Banner tiêu đề — bố cục giống trang quản trị tham khảo (gradient, tiêu đề + hành động chính),
+ * chỉ đổi cách trình bày, vẫn dùng đúng 2 màu --primary/--primary-2 hiện có, không đổi bảng màu. */
+.page-head { position: relative; overflow: hidden; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  margin-bottom: 18px; flex-wrap: wrap; border-radius: var(--radius); padding: 22px 26px;
+  background: linear-gradient(135deg, var(--bg-2), var(--card) 60%, rgb(31 181 181 / 10%)); border: 1px solid var(--line); }
+.page-head::before { content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px; border-radius: 50%;
+  background: rgb(31 181 181 / 7%); pointer-events: none; }
+.page-head h1 { margin: 0; font-size: 22px; letter-spacing: -.4px; position: relative; }
+.page-head p { margin: 4px 0 0; color: var(--muted); position: relative; }
+.page-head > div:last-child { position: relative; }
+
+.section-card { border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); margin-bottom: 14px; overflow: hidden; }
+.section-card .sc-head { padding: 14px 18px 2px; }
+.section-card .sc-head strong { font-size: 13px; }
+.section-card .sc-head p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.section-card .sc-body { padding: 12px 18px 16px; display: grid; gap: 12px; }
+.section-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.section-row + .section-row { border-top: 1px solid var(--line); padding-top: 12px; }
+.section-row .s-label { white-space: nowrap; min-width: 150px; font-weight: 650; font-size: 13px; }
+
+.settings-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.setting-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.setting-field .input { flex: 1 1 160px; }
+.setting-field + .setting-field { margin-top: 10px; }
+.setting-label { white-space: nowrap; min-width: 64px; font-weight: 650; font-size: 13px; color: var(--muted); }
+
+.secondary-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+
+/* Dropdown tự thiết kế (không dùng <select> gốc) — để menu luôn rộng đúng bằng nút và font
+ * đồng nhất với toàn hệ thống, thay vì phụ thuộc cách trình duyệt tự vẽ <select>. */
+.dropdown-select { position: relative; display: none; margin-bottom: 14px; }
+.dropdown-trigger { width: 100%; justify-content: space-between; }
+.dropdown-trigger svg { transition: transform .15s; }
+.dropdown-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
+.dropdown-menu { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 25; background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow); overflow: hidden; }
+.dropdown-item { display: block; width: 100%; padding: 11px 14px; border: 0; border-top: 1px solid var(--line);
+  background: transparent; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.dropdown-item:first-child { border-top: 0; }
+.dropdown-item:hover { background: var(--card-2); }
+
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.kpi { padding: 14px 16px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); display: grid; gap: 6px;
+  box-shadow: 0 10px 24px -20px rgb(0 0 0 / 60%); }
 .kpi .k-top { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; font-weight: 600; }
 .kpi .k-icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; }
 .kpi .k-icon svg { width: 16px; height: 16px; }
@@ -106,33 +194,34 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; }
 .kpi.t-bad .k-icon { background: rgb(255 138 138 / 14%); color: var(--bad); }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
 .tabs { display: inline-flex; padding: 3px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); flex-wrap: wrap; }
-.tab { height: 32px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.tab { height: 34px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; transition: background .12s, color .12s; }
 .tab:hover { color: var(--text); }
-.tab[aria-selected="true"] { background: var(--card-2); color: var(--text); box-shadow: 0 1px 0 rgb(255 255 255 / 4%) inset; }
+.tab[aria-selected="true"] { background: var(--card-2); color: var(--text); box-shadow: 0 0 0 1px var(--primary) inset, 0 1px 0 rgb(255 255 255 / 4%) inset; }
 .tab .count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--bg-2); font-size: 11px; display: inline-grid; place-items: center; }
 .toolbar .search { flex: 1 1 240px; }
 .toolbar select.input { width: auto; height: 38px; }
-.panel { border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); overflow: hidden; }
+.panel { border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); overflow: hidden;
+  box-shadow: 0 14px 32px -26px rgb(0 0 0 / 60%); }
 table { width: 100%; border-collapse: collapse; }
-thead th { text-align: left; padding: 11px 16px; font-size: 11px; font-weight: 700; color: var(--faint); text-transform: uppercase;
+thead th { text-align: left; padding: 9px 14px; font-size: 10.5px; font-weight: 700; color: var(--faint); text-transform: uppercase;
   letter-spacing: .6px; background: var(--bg-2); border-bottom: 1px solid var(--line); white-space: nowrap; }
-tbody td { padding: 14px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tbody td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 tbody tr { cursor: pointer; transition: background .12s; }
 tbody tr:hover { background: rgb(255 255 255 / 2.5%); }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr.selected { background: rgb(31 181 181 / 6%); }
-.who { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.avatar { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none; font-weight: 700; font-size: 14px; color: #0b1416; }
-.who b { display: block; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
-.sub { color: var(--muted); font-size: 12px; }
+.who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.avatar { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex: none; font-weight: 700; font-size: 12px; color: #0b1416; }
+.who b { display: block; font-weight: 650; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.sub { color: var(--muted); font-size: 11.5px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 21px; padding: 0 9px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .pill.ok { color: var(--ok); background: rgb(45 212 191 / 11%); }
 .pill.warn { color: var(--warn); background: rgb(242 196 109 / 12%); }
 .pill.bad { color: var(--bad); background: rgb(255 138 138 / 11%); }
 .pill.muted { color: var(--muted); background: rgb(154 164 180 / 12%); }
-.term { min-width: 150px; }
+.term { min-width: 130px; }
 .term .bar { height: 6px; border-radius: 999px; background: var(--bg-2); overflow: hidden; margin: 6px 0 4px; }
 .term .bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--primary), var(--ok)); }
 .term.warn .bar i { background: var(--warn); }
@@ -156,14 +245,16 @@ tbody tr.selected { background: rgb(31 181 181 / 6%); }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .scrim { position: fixed; inset: 0; background: rgb(0 0 0 / 45%); z-index: 40; opacity: 0; pointer-events: none; transition: opacity .2s; }
 .scrim.open { opacity: 1; pointer-events: auto; }
-.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100%); z-index: 50; background: var(--bg-2);
-  border-left: 1px solid var(--line); box-shadow: var(--shadow); transform: translateX(100%); transition: transform .22s ease; display: flex; flex-direction: column; }
-.drawer.open { transform: none; }
-.drawer header { display: flex; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+/* Popup chi tiết khách — hiện giữa màn hình (giống dialog), không còn trượt từ cạnh phải. */
+.drawer { position: fixed; inset: 0; margin: auto; width: min(640px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px));
+  z-index: 50; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: var(--shadow);
+  opacity: 0; transform: scale(.96); pointer-events: none; transition: opacity .18s ease, transform .18s ease; display: flex; flex-direction: column; overflow: hidden; }
+.drawer.open { opacity: 1; transform: scale(1); pointer-events: auto; }
+.drawer header { display: flex; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--line); flex: none; }
 .drawer header .who { flex: 1; }
 .drawer .body { flex: 1; overflow-y: auto; padding: 18px 20px 28px; display: grid; gap: 18px; align-content: start; }
 .section h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); }
-.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
 .fact { padding: 12px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--line); min-width: 0; }
 .fact span { display: block; color: var(--muted); font-size: 12px; }
 .fact b { display: block; margin-top: 2px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -191,14 +282,27 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
 .notice svg { color: var(--warn); margin-top: 1px; }
 @media (max-width: 1100px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) {
-  .topbar, .page { padding-left: 16px; padding-right: 16px; }
+  .page { padding: 16px 14px 48px; }
   .who-pill { display: none; }
+  .page-head { padding: 16px 16px; align-items: flex-start; }
+  .page-head h1 { font-size: 19px; }
+  .page-head > div:last-child { width: 100%; }
+  .page-head > div:last-child .btn { flex: 1; }
+  .secondary-toolbar { display: none; }
+  .dropdown-select { display: block; }
+  .section-row { flex-direction: column; align-items: stretch; }
+  .section-row .s-label { min-width: 0; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kpi { padding: 10px 12px; }
+  .kpi b { font-size: 20px; }
+  .toolbar .search { flex: 1 1 100%; order: -1; }
   thead { display: none; }
   table, tbody, tr, td { display: block; width: 100%; }
   tbody tr { padding: 12px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
   tbody td { padding: 0; border: 0; }
   .row-actions { justify-content: flex-start; }
   .facts { grid-template-columns: 1fr; }
+  .drawer { width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
 }
 </style>
 </head>
@@ -208,71 +312,76 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
   <form class="login-card" id="login-form" novalidate>
     <div class="brand"><span class="mark" id="mark1"></span><div>Suno Pro Admin<small>Quản lý key và khách hàng</small></div></div>
     <div class="login-error" id="login-error" role="alert" hidden></div>
+    <div class="login-success" id="login-success" role="status" hidden></div>
     <label class="field"><span>Email</span>
       <div class="input-wrap" data-icon="user"><input class="input" id="login-email" type="email" autocomplete="username" required autofocus></div>
     </label>
-    <label class="field"><span>Mật khẩu</span>
-      <div class="input-wrap" data-icon="lock"><input class="input" id="login-password" type="password" autocomplete="current-password" required></div>
+    <label class="field" id="login-password-field"><span>Mật khẩu</span>
+      <div class="input-wrap" data-icon="lock">
+        <input class="input" id="login-password" type="password" autocomplete="current-password" required style="padding-right:38px">
+        <button type="button" class="btn ghost icon sm" id="login-password-toggle" aria-label="Hiện mật khẩu" tabindex="-1"></button>
+      </div>
     </label>
+    <div class="login-row" id="login-options">
+      <label><input type="checkbox" id="login-remember" checked> Ghi nhớ đăng nhập</label>
+      <a href="#" id="login-forgot">Quên mật khẩu?</a>
+    </div>
     <button class="btn primary block" id="login-submit" type="submit">Đăng nhập</button>
+    <p class="login-foot" id="login-back-wrap" hidden><a href="#" id="login-back">← Quay lại đăng nhập</a></p>
     <p class="login-foot">Suno Pro — quản trị key khách hàng</p>
   </form>
 </main>
 
-<div id="appView" hidden>
-  <header class="topbar">
-    <div class="brand"><span class="mark" id="mark2"></span><div>Suno Pro<small>Quản trị</small></div></div>
-    <span class="spacer"></span>
-    <span class="who-pill" id="whoami"></span>
-    <button class="btn ghost sm" id="refresh" type="button"></button>
-    <button class="btn sm" id="logout" type="button"></button>
-  </header>
+<div id="appView" class="shell" hidden>
+  <aside class="sidebar">
+    <div class="sidebar-brand"><span class="mark" id="mark2"></span><div>Suno Pro<small>Quản trị</small></div></div>
+    <nav class="sidebar-nav">
+      <a class="sidebar-link active" href="#" data-view="customers"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg><span class="lbl">Khách hàng & key</span></a>
+      <a class="sidebar-link" href="#" data-view="settings"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg><span class="lbl">Cài đặt & cấu hình</span></a>
+    </nav>
+    <div class="sidebar-bottom">
+      <span class="who-pill" id="whoami"></span>
+      <button class="btn ghost sm" id="refresh" type="button"></button>
+      <button class="btn sm" id="logout" type="button"></button>
+    </div>
+  </aside>
 
   <main class="page">
+  <div id="view-customers">
     <div class="page-head">
       <div><h1>Khách hàng & key</h1><p>Tạo key, gia hạn, thu hồi và theo dõi thiết bị của từng khách.</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn ghost" id="view-leads" type="button"></button>
-        <button class="btn ghost" id="view-payments" type="button"></button>
-        <button class="btn ghost" id="view-ip-bans" type="button"></button>
-        <button class="btn ghost" id="broadcast-key" type="button"></button>
-        <button class="btn ghost" id="renew-trial" type="button"></button>
-        <button class="btn ghost" id="cleanup-trial" type="button"></button>
         <button class="btn" id="bulk-key" type="button"></button>
         <button class="btn primary" id="new-key" type="button"></button>
+      </div>
+    </div>
+
+    <div class="secondary-toolbar">
+      <button class="btn ghost sm" id="view-leads" type="button"></button>
+      <button class="btn ghost sm" id="view-payments" type="button"></button>
+      <button class="btn ghost sm" id="view-ip-bans" type="button"></button>
+      <button class="btn ghost sm" id="broadcast-key" type="button"></button>
+      <button class="btn ghost sm" id="renew-trial" type="button"></button>
+      <button class="btn ghost sm" id="cleanup-trial" type="button"></button>
+    </div>
+    <div class="dropdown-select" id="secondary-actions-dropdown">
+      <button type="button" class="btn ghost dropdown-trigger" id="secondary-actions-trigger" aria-haspopup="listbox" aria-expanded="false">
+        <span>Thao tác khác…</span>
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="dropdown-menu" id="secondary-actions-menu" role="listbox" hidden>
+        <button type="button" class="dropdown-item" data-target="view-leads">Email đăng ký</button>
+        <button type="button" class="dropdown-item" data-target="view-payments">Dòng tiền</button>
+        <button type="button" class="dropdown-item" data-target="view-ip-bans">IP bị chặn</button>
+        <button type="button" class="dropdown-item" data-target="broadcast-key">Gửi mail hàng loạt</button>
+        <button type="button" class="dropdown-item" data-target="renew-trial">Gia hạn trial hết hạn +1 ngày</button>
+        <button type="button" class="dropdown-item" data-target="cleanup-trial">Xoá trial hết hạn</button>
       </div>
     </div>
 
     <div class="notice" id="ip-ban-alert" hidden style="margin-bottom:14px"></div>
 
     <section class="kpis" id="kpis" aria-label="Tổng quan"></section>
-
-    <section class="panel" style="padding:14px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-      <strong style="white-space:nowrap">Mã xác nhận nhóm Zalo</strong>
-      <input class="input" id="trial-code-input" style="max-width:200px" maxlength="40" placeholder="Chưa đặt mã">
-      <button class="btn sm" id="trial-code-save" type="button"></button>
-      <span class="sub" style="flex:1 1 220px">Ghim mã này trong nhóm Zalo — người dùng cần nhập đúng mã mới nhận được key dùng thử tại trang <code>/trial</code>.</span>
-    </section>
-
-    <section class="panel" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <strong style="white-space:nowrap;min-width:150px">Link tải — Windows</strong>
-        <input class="input" id="download-url-win-input" style="max-width:420px;flex:1 1 320px" maxlength="500" placeholder="https://drive.google.com/...">
-        <button class="btn sm" id="download-url-win-save" type="button"></button>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <strong style="white-space:nowrap;min-width:150px">Link tải — macOS</strong>
-        <input class="input" id="download-url-mac-input" style="max-width:420px;flex:1 1 320px" maxlength="500" placeholder="https://drive.google.com/...">
-        <button class="btn sm" id="download-url-mac-save" type="button"></button>
-      </div>
-      <span class="sub">2 nút "Tải cho Windows"/"Tải cho macOS" ở trang <code>/huong-dan</code> dùng các link này — đổi ở đây có hiệu lực ngay, không cần deploy lại.</span>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:2px">
-        <strong style="white-space:nowrap;min-width:150px">Phiên bản mới nhất</strong>
-        <input class="input" id="app-version-input" style="max-width:160px" maxlength="40" placeholder="vd: 2.5.0">
-        <button class="btn sm" id="app-version-save" type="button"></button>
-        <span class="sub" style="flex:1 1 220px">App khởi động sẽ so với số này (qua KEY đang dùng) — khác thì bắt cập nhật (KEY hệ thống chỉ cảnh báo, không bị chặn).</span>
-      </div>
-    </section>
 
     <div class="toolbar">
       <div class="tabs" role="tablist" id="tabs"></div>
@@ -297,8 +406,54 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
       <div class="pagination" id="pagination" hidden></div>
     </section>
     <p class="updated" id="updated"></p>
+  </div>
+
+  <div id="view-settings" hidden>
+    <div class="page-head">
+      <div><h1>Cài đặt & cấu hình</h1><p>Mã xác nhận Zalo, link tải bản cài đặt và số phiên bản — đổi ở đây có hiệu lực ngay, không cần deploy lại.</p></div>
+    </div>
+
+    <div class="settings-grid">
+      <section class="section-card">
+        <div class="sc-head"><strong>Mã xác nhận nhóm Zalo</strong><p>Người dùng cần nhập đúng mã mới nhận được key dùng thử tại trang <code>/trial</code>.</p></div>
+        <div class="sc-body">
+          <div class="setting-field">
+            <input class="input" id="trial-code-input" maxlength="40" placeholder="Chưa đặt mã">
+            <button class="btn sm" id="trial-code-save" type="button"></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <div class="sc-head"><strong>Link tải ứng dụng</strong><p>2 nút "Tải cho Windows"/"Tải cho macOS" ở trang <code>/huong-dan</code> dùng 2 link này.</p></div>
+        <div class="sc-body">
+          <div class="setting-field">
+            <span class="setting-label">Windows</span>
+            <input class="input" id="download-url-win-input" maxlength="500" placeholder="https://drive.google.com/...">
+            <button class="btn sm" id="download-url-win-save" type="button"></button>
+          </div>
+          <div class="setting-field">
+            <span class="setting-label">macOS</span>
+            <input class="input" id="download-url-mac-input" maxlength="500" placeholder="https://drive.google.com/...">
+            <button class="btn sm" id="download-url-mac-save" type="button"></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <div class="sc-head"><strong>Phiên bản mới nhất</strong><p>App khởi động sẽ so với số này (qua KEY đang dùng) — khác thì bắt cập nhật (KEY hệ thống chỉ cảnh báo, không bị chặn).</p></div>
+        <div class="sc-body">
+          <div class="setting-field">
+            <input class="input" id="app-version-input" style="max-width:200px" maxlength="40" placeholder="vd: 2.5.0">
+            <button class="btn sm" id="app-version-save" type="button"></button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
   </main>
 </div>
+<!-- /appView -->
 
 <div class="scrim" id="scrim"></div>
 <aside class="drawer" id="drawer" aria-label="Chi tiết khách"></aside>
@@ -462,6 +617,8 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     chevronLeft: '<path d="m15 18-6-6 6-6"/>',
     chevronRight: '<path d="m9 18 6-6-6-6"/>',
     trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+    eyeOff: '<path d="M10.7 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a13.2 13.2 0 0 1-2.4 3.4M6.6 6.6C4 8.3 2 12 2 12s3.5 7 10 7a9.9 9.9 0 0 0 5-1.3M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M2 2l20 20"/>',
   };
   const icon = (name, cls = "i") => \`<svg class="\${cls}" viewBox="0 0 24 24" aria-hidden="true">\${P[name] ?? ""}</svg>\`;
   const markSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v8.55c-.94-.54-2.1-.75-3.33-.32-1.34.48-2.37 1.67-2.61 3.07-.46 2.74 1.86 5.08 4.59 4.65 1.96-.31 3.35-2.11 3.35-4.1V7h2c1.1 0 2-.9 2-2s-.9-2-2-2h-2c-1.1 0-2 .9-2 2z"/></svg>';
@@ -516,17 +673,91 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
 
   // ---------- Đăng nhập ----------
   const loginView = $("#loginView"), appView = $("#appView");
+  const REMEMBER_EMAIL_KEY = "sunopro_admin_email";
+  try { $("#login-email").value = localStorage.getItem(REMEMBER_EMAIL_KEY) || ""; } catch {}
+
+  // Hiện/ẩn mật khẩu
+  const pwInput = $("#login-password"), pwToggle = $("#login-password-toggle");
+  pwToggle.innerHTML = icon("eye");
+  pwToggle.addEventListener("click", () => {
+    const show = pwInput.type === "password";
+    pwInput.type = show ? "text" : "password";
+    pwToggle.innerHTML = icon(show ? "eyeOff" : "eye");
+    pwToggle.setAttribute("aria-label", show ? "Ẩn mật khẩu" : "Hiện mật khẩu");
+  });
+
+  // Quên mật khẩu — chuyển form sang chế độ gửi email khôi phục, không cần nhập mật khẩu
+  let authMode = "login";
+  function setAuthMode(mode) {
+    authMode = mode;
+    $("#login-error").hidden = true;
+    $("#login-success").hidden = true;
+    const resetMode = mode === "reset";
+    $("#login-password-field").hidden = resetMode;
+    $("#login-options").hidden = resetMode;
+    $("#login-back-wrap").hidden = !resetMode;
+    $("#login-submit").textContent = resetMode ? "Gửi email khôi phục" : "Đăng nhập";
+  }
+  $("#login-forgot").addEventListener("click", (e) => { e.preventDefault(); setAuthMode("reset"); });
+  $("#login-back").addEventListener("click", (e) => { e.preventDefault(); setAuthMode("login"); });
+
   $("#login-submit").parentElement.addEventListener("submit", (e) => {
     e.preventDefault();
     $("#login-error").hidden = true;
+    $("#login-success").hidden = true;
+    const email = $("#login-email").value.trim();
     const btn = $("#login-submit");
     btn.disabled = true;
+
+    if (authMode === "reset") {
+      btn.textContent = "Đang gửi…";
+      auth.sendPasswordResetEmail(email)
+        .then(() => {
+          $("#login-success").innerHTML = icon("check") + "<span>Đã gửi email khôi phục tới " + esc(email) + " — kiểm tra hộp thư (và mục Spam).</span>";
+          $("#login-success").hidden = false;
+        })
+        .catch((err) => { $("#login-error").innerHTML = icon("alert") + "<span>" + esc(err.message || "Không gửi được email khôi phục.") + "</span>"; $("#login-error").hidden = false; })
+        .finally(() => { btn.disabled = false; btn.textContent = "Gửi email khôi phục"; });
+      return;
+    }
+
     btn.textContent = "Đang đăng nhập…";
-    auth.signInWithEmailAndPassword($("#login-email").value.trim(), $("#login-password").value)
+    const remember = $("#login-remember").checked;
+    auth.setPersistence(remember ? firebase.auth.Auth.Persistence.LOCAL : firebase.auth.Auth.Persistence.SESSION)
+      .then(() => auth.signInWithEmailAndPassword(email, $("#login-password").value))
+      .then(() => { try { if (remember) localStorage.setItem(REMEMBER_EMAIL_KEY, email); else localStorage.removeItem(REMEMBER_EMAIL_KEY); } catch {} })
       .catch((err) => { $("#login-error").innerHTML = icon("alert") + "<span>" + esc(err.message || "Đăng nhập thất bại.") + "</span>"; $("#login-error").hidden = false; })
       .finally(() => { btn.disabled = false; btn.textContent = "Đăng nhập"; });
   });
   $("#logout").addEventListener("click", () => auth.signOut());
+
+  // ---------- Mobile: dropdown gộp các thao tác phụ (thay cho dãy nút bị ẩn trên màn hình nhỏ) ----------
+  (() => {
+    const trigger = $("#secondary-actions-trigger"), menu = $("#secondary-actions-menu");
+    const closeMenu = () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
+    trigger.addEventListener("click", () => {
+      const open = menu.hidden;
+      menu.hidden = !open;
+      trigger.setAttribute("aria-expanded", String(open));
+    });
+    menu.addEventListener("click", (e) => {
+      const item = e.target.closest(".dropdown-item");
+      if (!item) return;
+      closeMenu();
+      $("#" + item.dataset.target).click();
+    });
+    document.addEventListener("click", (e) => { if (!e.target.closest("#secondary-actions-dropdown")) closeMenu(); });
+  })();
+
+  // ---------- Menu sidebar: chuyển giữa "Khách hàng & key" và "Cài đặt & cấu hình" ----------
+  document.querySelectorAll(".sidebar-link[data-view]").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      document.querySelectorAll(".sidebar-link[data-view]").forEach((l) => l.classList.toggle("active", l === link));
+      $("#view-customers").hidden = link.dataset.view !== "customers";
+      $("#view-settings").hidden = link.dataset.view !== "settings";
+    });
+  });
   auth.onAuthStateChanged((user) => {
     if (user) {
       $("#whoami").innerHTML = '<span class="dot"></span>' + esc(user.email);
@@ -540,6 +771,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
     } else {
       loginView.hidden = false;
       appView.hidden = true;
+      setAuthMode("login");
     }
   });
 
@@ -738,7 +970,7 @@ dialog .d-actions { display: flex; justify-content: flex-end; gap: 8px; margin-t
 
   // ---------- Khung trang ----------
   $("#refresh").innerHTML = icon("refresh") + '<span class="lbl">Làm mới</span>';
-  $("#logout").innerHTML = icon("logout") + "Đăng xuất";
+  $("#logout").innerHTML = icon("logout") + '<span class="lbl">Đăng xuất</span>';
   $("#new-key").innerHTML = icon("plus") + "Tạo key";
   $("#bulk-key").innerHTML = icon("plus") + "Tạo hàng loạt";
   $("#cleanup-trial").innerHTML = icon("trash") + "Xoá trial hết hạn";

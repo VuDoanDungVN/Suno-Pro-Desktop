@@ -1479,6 +1479,7 @@
             <div id="importSingleMode">
               <div class="suno-url-hint">Chọn 1 file MP3 để chia nhỏ và đưa lên Suno.</div>
               <button id="importSingleBtn" class="suno-connect-btn suno-centered-btn-100" type="button" style="margin-top:8px;">Chọn file…</button>
+              <div class="suno-url-hint" style="margin-top:8px;">Chỉ gói 6 tháng và 1 năm mới có chức năng gán nhiều link và import nhiều file audio cùng lúc.</div>
             </div>
             <div id="importMultiMode" hidden>
               <div class="suno-url-hint">Chọn nhiều file MP3 — xử lý lần lượt từng file, theo dõi tiến độ ở khối "Hàng đợi xử lý" bên dưới.</div>
@@ -1531,6 +1532,7 @@
                 <button id="ytDownloadBtn" class="suno-connect-btn suno-yt-action-btn" type="button">Tải về</button>
                 <button id="ytCancelBtn" class="suno-test-btn suno-btn-ghost suno-yt-action-btn" type="button" disabled>Hủy</button>
               </div>
+              <div class="suno-url-hint" style="margin-top:8px;">Chỉ gói 6 tháng và 1 năm mới có chức năng gán nhiều link và import nhiều file audio cùng lúc.</div>
               <div id="ytStage" class="suno-status hidden"></div>
               <div class="suno-yt-bar"><i id="ytProgressBar"></i></div>
             </div>
@@ -3458,7 +3460,7 @@
       }
       if (importModeSingleBtn) importModeSingleBtn.addEventListener('click', function () { setImportMode(false); });
       if (importModeMultiBtn) importModeMultiBtn.addEventListener('click', function () {
-        if (!window.__sunoIsSystemKey) return;
+        if (!window.__sunoCanMulti) return;
         setImportMode(true);
       });
 
@@ -3566,7 +3568,7 @@
       }
       if (ytModeSingleBtn) ytModeSingleBtn.addEventListener('click', function () { setYoutubeMode(false); });
       if (ytModeMultiBtn) ytModeMultiBtn.addEventListener('click', function () {
-        if (!window.__sunoIsSystemKey) return;
+        if (!window.__sunoCanMulti) return;
         setYoutubeMode(true);
       });
 
@@ -4110,21 +4112,33 @@
         var logMenuItem = document.getElementById('menuOpenLogViewerBtn');
         var logPopupIcon = document.getElementById('uploadConfirmLogBtn');
         var reverseLogPopupIcon = document.getElementById('reverseLogBtn');
-        var importModeMultiBtnEl = document.getElementById('importModeMultiBtn');
-        var ytModeMultiBtnEl = document.getElementById('ytModeMultiBtn');
         if (logMenuItem) logMenuItem.hidden = !isSystemKey;
         if (logPopupIcon) logPopupIcon.hidden = !isSystemKey;
         if (reverseLogPopupIcon) reverseLogPopupIcon.hidden = !isSystemKey;
-        if (importModeMultiBtnEl) importModeMultiBtnEl.hidden = !isSystemKey;
-        if (ytModeMultiBtnEl) ytModeMultiBtnEl.hidden = !isSystemKey;
+      }
+      // Tab "Nhiều link"/"Nhiều file" chỉ dành cho KEY 6 tháng ('d180') và 1 năm ('d365') —
+      // KEY hệ thống (owner) luôn được dùng để tiện test, các KEY khác (1 ngày/30 ngày/dùng thử)
+      // chỉ thấy tab "1 link"/"1 file" cơ bản.
+      function applyMultiFeatureVisibility(canMulti) {
+        window.__sunoCanMulti = !!canMulti;
+        var importModeMultiBtnEl = document.getElementById('importModeMultiBtn');
+        var ytModeMultiBtnEl = document.getElementById('ytModeMultiBtn');
+        if (importModeMultiBtnEl) importModeMultiBtnEl.hidden = !canMulti;
+        if (ytModeMultiBtnEl) ytModeMultiBtnEl.hidden = !canMulti;
       }
       function refreshSystemKeyVisibility() {
-        if (!api || typeof api.sunoProLicenseInfo !== 'function') { applySystemKeyVisibility(false); return Promise.resolve(false); }
+        if (!api || typeof api.sunoProLicenseInfo !== 'function') {
+          applySystemKeyVisibility(false);
+          applyMultiFeatureVisibility(false);
+          return Promise.resolve(false);
+        }
         return api.sunoProLicenseInfo().then(function (res) {
           var isSystemKey = !!(res && res.ok && res.role === 'owner');
+          var plan = res && res.ok && res.license ? res.license.plan : null;
           applySystemKeyVisibility(isSystemKey);
+          applyMultiFeatureVisibility(isSystemKey || plan === 'd180' || plan === 'd365');
           return isSystemKey;
-        }).catch(function () { applySystemKeyVisibility(false); return false; });
+        }).catch(function () { applySystemKeyVisibility(false); applyMultiFeatureVisibility(false); return false; });
       }
 
       // ── Kiểm tra phiên bản app — gọi NGAY sau khi đã biết role (owner hay
@@ -4183,6 +4197,7 @@
         clearKeyBoxes();
         showForm(message);
         applySystemKeyVisibility(false);
+        applyMultiFeatureVisibility(false);
         if (appVersionGate) appVersionGate.hidden = true;
       }
 
