@@ -282,7 +282,8 @@
       </div>
       <div class="cm-modal-body">
         <div id="licenseInfoBody"><p class="suno-status">Đang tải…</p></div>
-        <button id="licenseInfoLogoutBtn" class="suno-test-btn" type="button" style="color:var(--red);border-color:var(--red);width:100%;margin-top:14px;">🔑 Đăng xuất Key</button>
+        <button id="licenseInfoBuyKeyBtn" class="suno-connect-btn suno-full-width-btn" type="button" style="margin-top:14px;" hidden>💳 Mua Key</button>
+        <button id="licenseInfoLogoutBtn" class="suno-test-btn" type="button" style="color:var(--red);border-color:var(--red);width:100%;margin-top:10px;">🔑 Đăng xuất Key</button>
       </div>
     </div>
   </div>
@@ -1351,7 +1352,7 @@
       <div class="cm-modal" style="width:460px;" role="dialog" aria-modal="true" aria-labelledby="generateModalTitle">
         <div class="cm-modal-header">
           <span id="generateModalTitle">✨ Tạo nhạc</span>
-          <button id="closeGenerateModalBtn" class="cm-modal-close" type="button" aria-label="Đóng">✕</button>
+          <button id="closeGenerateModalBtn" class="cm-modal-close" type="button" aria-label="Đóng" hidden>✕</button>
         </div>
         <div class="cm-modal-body">
           <div id="generateFormWrap">
@@ -1543,7 +1544,7 @@
                 <button id="ytDownloadBtn" class="suno-connect-btn suno-yt-action-btn" type="button">Tải về</button>
                 <button id="ytCancelBtn" class="suno-test-btn suno-btn-ghost suno-yt-action-btn" type="button" disabled>Hủy</button>
               </div>
-              <div class="suno-url-hint" style="margin-top:8px;">Chỉ gói 30 ngày, 6 tháng và 1 năm mới có chức năng gán nhiều link và import nhiều file audio cùng lúc.</div>
+              <div class="suno-url-hint" style="margin-top:8px;">Chỉ gói 30 ngày, 6 tháng và 1 năm mới có chức năng gán nhiều link và import nhiều file audio cùng lúc. <a id="ytUpgradeLink" href="#" style="color:#7dd3fc;text-decoration:underline;">Nâng cấp tại đây</a></div>
               <div id="ytStage" class="suno-status hidden"></div>
               <div class="suno-yt-bar"><i id="ytProgressBar"></i></div>
             </div>
@@ -1653,6 +1654,7 @@
       var licenseInfoBody = document.getElementById('licenseInfoBody');
       var closeLicenseInfoBtn = document.getElementById('closeLicenseInfoBtn');
       var licenseInfoLogoutBtn = document.getElementById('licenseInfoLogoutBtn');
+      var licenseInfoBuyKeyBtn = document.getElementById('licenseInfoBuyKeyBtn');
 
       function closeDropdown() {
         if (!settingsDropdown) return;
@@ -1699,8 +1701,16 @@
         try { return new Date(ms).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
         catch (e) { return null; }
       }
-      function renderLicenseInfo(license, role) {
+      // quota.limit === null → không giới hạn (xem worker/src/quota.ts::getQuotaStatus).
+      function quotaRowHtml(label, status) {
+        var valueHtml = (!status || status.limit === null)
+          ? 'Không giới hạn'
+          : 'Còn ' + status.remaining + '/' + status.limit + ' lượt hôm nay';
+        return '<div class="suno-license-info-row"><span class="suno-license-info-label">' + label + '</span><span class="suno-license-info-value">' + valueHtml + '</span></div>';
+      }
+      function renderLicenseInfo(license, role, quota) {
         if (!licenseInfoBody) return;
+        if (licenseInfoBuyKeyBtn) licenseInfoBuyKeyBtn.hidden = role === 'owner';
         if (!license) {
           // KEY hệ thống (owner) không có bản ghi license nào (bypass hẳn DB, xem auth.ts::authorize)
           // — "license: null" ở đây là ĐÚNG như thiết kế, không phải lỗi.
@@ -1725,7 +1735,9 @@
           '<div class="suno-license-info-row"><span class="suno-license-info-label">Tên</span><span class="suno-license-info-value">' +
           esc(license.name || '—') +
           '</span></div>' +
-          '<div class="suno-license-info-row"><span class="suno-license-info-label">Thời hạn</span><span class="suno-license-info-value">' + expiresValueHtml + '</span></div>';
+          '<div class="suno-license-info-row"><span class="suno-license-info-label">Thời hạn</span><span class="suno-license-info-value">' + expiresValueHtml + '</span></div>' +
+          quotaRowHtml('Lượt upload', quota && quota.upload) +
+          quotaRowHtml('Lượt tạo nhạc', quota && quota.generate);
       }
       if (menuOpenLicenseInfoBtn) {
         menuOpenLicenseInfoBtn.addEventListener('click', function () {
@@ -1735,11 +1747,18 @@
           licenseInfoBody.innerHTML = '<p class="suno-status">Đang tải…</p>';
           if (!window.electronAPI || typeof window.electronAPI.sunoProLicenseInfo !== 'function') return;
           window.electronAPI.sunoProLicenseInfo().then(function (res) {
-            if (res && res.ok) renderLicenseInfo(res.license, res.role);
+            if (res && res.ok) renderLicenseInfo(res.license, res.role, res.quota);
             else licenseInfoBody.innerHTML = '<p class="suno-status err">' + ((res && res.message) || 'Không lấy được thông tin Key.') + '</p>';
           }).catch(function () {
             licenseInfoBody.innerHTML = '<p class="suno-status err">Không lấy được thông tin Key.</p>';
           });
+        });
+      }
+      if (licenseInfoBuyKeyBtn) {
+        licenseInfoBuyKeyBtn.addEventListener('click', function () {
+          if (api && typeof api.openExternal === 'function') {
+            api.openExternal('https://suno-pro-worker.vudungit92.workers.dev/mua-key');
+          }
         });
       }
       if (closeLicenseInfoBtn) {
@@ -2735,6 +2754,7 @@
         if (generateFormWrap) generateFormWrap.hidden = false;
         if (generateRunningWrap) generateRunningWrap.hidden = true;
         if (generateDoneWrap) generateDoneWrap.hidden = true;
+        if (closeGenerateModalBtn) closeGenerateModalBtn.hidden = true; // chỉ hiện nút ✕ khi đã Hoàn tất
         if (genErrorBox) genErrorBox.hidden = true;
         if (genSubmitBtn) genSubmitBtn.disabled = false;
         if (genCoverPanel) genCoverPanel.hidden = true;
@@ -2752,6 +2772,16 @@
       }
       if (closeGenerateModalBtn) closeGenerateModalBtn.addEventListener('click', closeGenerateModal);
       if (genDoneCloseBtn) genDoneCloseBtn.addEventListener('click', closeGenerateModal);
+
+      // Mở popup "Tạo nhạc" sẵn đã gán 1 bài vừa upload làm cover reference — gọi từ popup
+      // "Hoàn tất" của luồng upload (nút "✨ Tạo nhạc", xem reverseDoneContinueBtn bên dưới).
+      window.sunoOpenGenerateWithCover = function (clipId, title) {
+        if (!generateModal || !window.sunoCurrentAlbum) return;
+        genResetForm();
+        genPopulateModelSelect();
+        generateModal.classList.remove('hidden');
+        if (clipId) genSetCover(clipId, title || '');
+      };
       if (generateModal) {
         generateModal.addEventListener('mousedown', function (ev) { if (ev.target === generateModal) closeGenerateModal(); });
       }
@@ -2836,7 +2866,11 @@
               if (typeof window.refreshAlbums === 'function') window.refreshAlbums();
               generateRunningWrap.hidden = true;
               generateDoneWrap.hidden = false;
+              if (closeGenerateModalBtn) closeGenerateModalBtn.hidden = false;
               genDoneMsg.textContent = '✅ Đã tạo ' + ok.length + '/' + clips.length + ' bản phối, đã thêm vào "Danh sách bài" của album. Bấm vào từng bài để tải xuống/nghe.';
+              if (typeof window.sunoAppendQuotaLine === 'function') {
+                window.sunoAppendQuotaLine(genDoneMsg.textContent, 'generate').then(function (full) { if (genDoneMsg) genDoneMsg.textContent = full; });
+              }
             });
           }).catch(function (e) {
             generateRunningWrap.hidden = true;
@@ -4053,6 +4087,16 @@
         });
       }
 
+      var ytUpgradeLinkBtn = document.getElementById('ytUpgradeLink');
+      if (ytUpgradeLinkBtn) {
+        ytUpgradeLinkBtn.addEventListener('click', function (e) {
+          e.preventDefault();
+          if (api && typeof api.openExternal === 'function') {
+            api.openExternal('https://suno-pro-worker.vudungit92.workers.dev/mua-key');
+          }
+        });
+      }
+
       if (!gate || !api || typeof api.sunoProLicenseStatus !== 'function') {
         // Môi trường không hỗ trợ (vd. chạy trong trình duyệt dev) — không
         // khoá cứng, để không chặn luôn các luồng dev/test khác.
@@ -4171,6 +4215,8 @@
         var ytModeMultiBtnEl = document.getElementById('ytModeMultiBtn');
         if (importModeMultiBtnEl) importModeMultiBtnEl.hidden = !canMulti;
         if (ytModeMultiBtnEl) ytModeMultiBtnEl.hidden = !canMulti;
+        var ytUpgradeLinkEl = document.getElementById('ytUpgradeLink');
+        if (ytUpgradeLinkEl) ytUpgradeLinkEl.hidden = !!canMulti;
       }
       function refreshSystemKeyVisibility() {
         if (!api || typeof api.sunoProLicenseInfo !== 'function') {
@@ -5177,6 +5223,25 @@
     });
   </script>
 
+  <!-- Lượt upload/tạo nhạc còn lại hôm nay (xem worker/src/quota.ts::getQuotaStatus, trả về qua
+       /auth/me) — dùng chung cho cả popup "Hoàn tất" của luồng upload (reverseDoneMsg) và luồng
+       Tạo nhạc (genDoneMsg). Đặt ở script riêng, không nằm trong closure nào, để gọi được từ cả 2. -->
+  <script>
+    window.sunoAppendQuotaLine = function (text, action) {
+      return new Promise(function (resolve) {
+        if (!window.electronAPI || typeof window.electronAPI.sunoProLicenseInfo !== 'function') { resolve(text); return; }
+        window.electronAPI.sunoProLicenseInfo().then(function (res) {
+          var status = res && res.ok && res.quota && res.quota[action];
+          var label = action === 'upload' ? 'upload' : 'tạo nhạc';
+          var line = (!status || status.limit === null)
+            ? 'Không giới hạn lượt ' + label + '.'
+            : 'Còn ' + status.remaining + '/' + status.limit + ' lượt ' + label + ' hôm nay.';
+          resolve(text + (text ? ' ' : '') + line);
+        }).catch(function () { resolve(text); });
+      });
+    };
+  </script>
+
   <!-- ── "Reverse" — pipeline ĐỘC LẬP, không đụng tới luồng cắt part/upload-part
        hiện có: upload nguyên bài 1 lần → tạo project Studio → gửi lệnh cố định
        vào chat AI → đợi 10s → render → Fade Out 5 giây cuối (tuỳ chọn) → tải + lưu file. ── -->
@@ -5323,10 +5388,16 @@
       if (reverseDoneMsg) { reverseDoneMsg.hidden = true; reverseDoneMsg.className = 'suno-status ok'; }
       if (reverseDoneActions) reverseDoneActions.hidden = true;
       if (reverseDoneDownloadBtn) reverseDoneDownloadBtn.hidden = false; // showReverseError() có thể đã ẩn ở lần chạy trước
+      if (closeReverseDoneBtn) closeReverseDoneBtn.hidden = true; // chỉ hiện nút ✕ khi đã có kết quả (xong/lỗi), không cho đóng giữa lúc đang xử lý
+      reverseDoneContinueMode = 'continue';
+      if (reverseDoneContinueBtn) reverseDoneContinueBtn.textContent = 'Tiếp tục';
       updateReverseProgress('Đang bắt đầu…');
       startReverseTimer();
       if (reverseDoneModal) reverseDoneModal.classList.remove('hidden');
     }
+    // "generate" = vừa upload thành công, nút thứ 2 đổi thành "✨ Tạo nhạc" (mở popup Tạo nhạc đã
+    // gán sẵn bài vừa upload làm cover); "continue" = lỗi/đạt giới hạn, nút thứ 2 chỉ đóng popup.
+    var reverseDoneContinueMode = 'continue';
     // Gọi khi đã có kết quả cuối cùng — chuyển popup sang trạng thái "xong", hiện 2 nút.
     function showReverseDone(msgText) {
       stopReverseTimer();
@@ -5338,6 +5409,12 @@
       if (reverseStepLabel) reverseStepLabel.textContent = '';
       if (reverseDoneMsg) { reverseDoneMsg.hidden = false; reverseDoneMsg.className = 'suno-status ok'; reverseDoneMsg.textContent = msgText; }
       if (reverseDoneActions) reverseDoneActions.hidden = false;
+      if (closeReverseDoneBtn) closeReverseDoneBtn.hidden = false;
+      reverseDoneContinueMode = 'generate';
+      if (reverseDoneContinueBtn) reverseDoneContinueBtn.textContent = '✨ Tạo nhạc';
+      if (typeof window.sunoAppendQuotaLine === 'function' && reverseDoneMsg) {
+        window.sunoAppendQuotaLine(msgText, 'upload').then(function (full) { if (reverseDoneMsg) reverseDoneMsg.textContent = full; });
+      }
     }
     // Gọi khi pipeline lỗi hẳn (không còn bài nào trong hàng đợi để tiếp tục) — thay vì tắt popup
     // im lặng như trước, hiện rõ lý do ngay trong popup. Lỗi "đạt giới hạn lượt/ngày" (quota) tô
@@ -5360,6 +5437,9 @@
       reversePendingTitle = null;
       if (reverseDoneDownloadBtn) reverseDoneDownloadBtn.hidden = true; // không có bản nào để tải khi lỗi/đạt giới hạn
       if (reverseDoneActions) reverseDoneActions.hidden = false;
+      if (closeReverseDoneBtn) closeReverseDoneBtn.hidden = false;
+      reverseDoneContinueMode = 'continue';
+      if (reverseDoneContinueBtn) reverseDoneContinueBtn.textContent = 'Tiếp tục';
       if (reverseDoneModal) reverseDoneModal.classList.remove('hidden');
     }
 
@@ -5384,6 +5464,13 @@
     }
     if (reverseDoneContinueBtn) {
       reverseDoneContinueBtn.addEventListener('click', function () {
+        if (reverseDoneContinueMode === 'generate' && reversePendingClipId && typeof window.sunoOpenGenerateWithCover === 'function') {
+          var clipId = reversePendingClipId, title = reversePendingTitle;
+          hideReverseDoneModal();
+          setStatus('', '');
+          window.sunoOpenGenerateWithCover(clipId, title);
+          return;
+        }
         hideReverseDoneModal();
         setStatus('', '');
       });
@@ -5849,7 +5936,7 @@
                   finalTitle = '[Done] ' + title;
                   logLine('Đã tìm thấy bản "[Done] ' + title + '" — dùng làm bản cuối cùng, đã dọn ' + (res.trashedCount || 0) + ' clip khác.');
                 } else {
-                  logLine('⚠ Không tìm thấy bản "[Done] ' + title + '" — giữ nguyên bản render/fade hiện tại, không xoá gì.');
+                  logLine('⚠ Không tìm thấy bản "[Done] ' + title + '" — giữ nguyên bản render/fade hiện tại' + (res && res.trashedCount ? ', đã dọn ' + res.trashedCount + ' clip rác (gồm cả bản "reversed-audio" nếu có).' : ', không xoá gì.'));
                 }
               }).catch(function (e) {
                 logLine('⚠ Dọn dẹp thư viện lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));
@@ -6036,7 +6123,7 @@
                 finalTitle = '[Done] ' + title;
                 logLine('Đã tìm thấy bản "[Done] ' + title + '" — dùng làm bản cuối cùng, đã dọn ' + (res.trashedCount || 0) + ' clip khác.');
               } else {
-                logLine('⚠ Không tìm thấy bản "[Done] ' + title + '" — giữ nguyên bản render/fade hiện tại, không xoá gì.');
+                logLine('⚠ Không tìm thấy bản "[Done] ' + title + '" — giữ nguyên bản render/fade hiện tại' + (res && res.trashedCount ? ', đã dọn ' + res.trashedCount + ' clip rác (gồm cả bản "reversed-audio" nếu có).' : ', không xoá gì.'));
               }
             }).catch(function (e) {
               logLine('⚠ Dọn dẹp thư viện lỗi (bỏ qua, không ảnh hưởng kết quả): ' + cleanErrorMessage(e));

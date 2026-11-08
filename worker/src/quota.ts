@@ -60,6 +60,29 @@ export async function checkQuota(env: Env, ctx: Ctx, action: QuotaAction): Promi
   }
 }
 
+export type QuotaStatus = { limit: number | null; used: number; remaining: number | null };
+
+/** Trả về trạng thái quota hôm nay (theo giờ VN) của cả 2 hành động — dùng để hiển thị cho người
+ * dùng (popup "Thời hạn của Key"/"Hoàn tất"), KHÔNG dùng để kiểm tra chặn (xem checkQuota ở trên).
+ * `limit`/`remaining` là null = không giới hạn. KEY hệ thống (owner) luôn trả về không giới hạn. */
+export async function getQuotaStatus(env: Env, ctx: Ctx): Promise<{ upload: QuotaStatus; generate: QuotaStatus }> {
+  const unlimited: QuotaStatus = { limit: null, used: 0, remaining: null };
+  if (ctx.licenseId === "owner") return { upload: unlimited, generate: unlimited };
+  const day = vnDay(Date.now());
+  const actions: QuotaAction[] = ["upload", "generate"];
+  const out: { upload: QuotaStatus; generate: QuotaStatus } = { upload: unlimited, generate: unlimited };
+  for (const action of actions) {
+    const limit = await getPlanLimit(env, ctx.licenseId, action);
+    if (limit === null) { out[action] = unlimited; continue; }
+    const row = await env.DB.prepare("SELECT count FROM usage_counters WHERE license_id = ? AND action = ? AND day = ?")
+      .bind(ctx.licenseId, action, day)
+      .first<{ count: number }>();
+    const used = (row && row.count) || 0;
+    out[action] = { limit, used, remaining: Math.max(0, limit - used) };
+  }
+  return out;
+}
+
 /** Gọi SAU khi hành động thật đã THÀNH CÔNG — cộng thêm đúng 1 lượt. Nhờ vậy 1 lượt bị lỗi giữa
  * đường (vd. upload thất bại) không bị trừ oan. KEY hệ thống hoặc loại KEY không giới hạn thì bỏ
  * qua luôn, không cần ghi gì vào bảng. */

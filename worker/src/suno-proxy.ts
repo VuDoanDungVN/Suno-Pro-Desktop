@@ -955,7 +955,12 @@ export async function cleanupKeepDone(request: Request, _env: Env): Promise<Resp
     const clips = Array.isArray(res && res.clips) ? res.clips : [];
     for (const c of clips) {
       if (!c || typeof c.title !== "string") continue;
-      if (c.title !== title && c.title !== doneTitle && c.title.indexOf(title) === -1) continue;
+      // "reversed-audio" là tên file cục bộ của bản đã đảo chiều/đổi tông TRƯỚC khi upload (xem
+      // dist/index.html::sunoRunReversePipeline) — Suno dùng luôn tên file này làm title khi
+      // không đặt title khác, nên dù KHÔNG tìm thấy "[Done] ..." (đổi tên thất bại/không chạy
+      // qua Studio) vẫn phải dọn bản này, không được để sót lại trong thư viện.
+      const isLeftoverReversedAudio = c.title.indexOf("reversed-audio") !== -1;
+      if (c.title !== title && c.title !== doneTitle && c.title.indexOf(title) === -1 && !isLeftoverReversedAudio) continue;
       const createdAt = typeof c.created_at === "string" ? Date.parse(c.created_at) : NaN;
       if (Number.isFinite(createdAt) && createdAt < cutoff) continue; // quá cũ — không đụng vào
       related.push({ id: c.id, title: c.title, createdAt: Number.isFinite(createdAt) ? createdAt : 0 });

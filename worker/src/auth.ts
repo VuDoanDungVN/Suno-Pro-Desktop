@@ -8,6 +8,7 @@
 // email tự động, disclaimer — Suno Pro chỉ có 1 loại client: app desktop).
 
 import { HttpError, bearer, cleanText, deviceIdHeader, json, randomToken, readJson, sameText, sha256Hex } from "./http";
+import { getQuotaStatus } from "./quota";
 
 export type Role = "desktop" | "owner";
 export interface Ctx {
@@ -372,8 +373,9 @@ export async function activate(request: Request, env: Env): Promise<Response> {
 
 /** `GET /auth/me` */
 export async function me(env: Env, ctx: Ctx): Promise<Response> {
-  if (ctx.licenseId === "owner") return json({ role: ctx.role, license: null });
-  return json({ role: ctx.role, license: licenseView(await getLicense(env, ctx.licenseId)) });
+  const quota = await getQuotaStatus(env, ctx);
+  if (ctx.licenseId === "owner") return json({ role: ctx.role, license: null, quota });
+  return json({ role: ctx.role, license: licenseView(await getLicense(env, ctx.licenseId)), quota });
 }
 
 /** `POST /auth/logout` */

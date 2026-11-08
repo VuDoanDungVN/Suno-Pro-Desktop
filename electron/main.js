@@ -671,7 +671,8 @@ ipcMain.handle('sunopro-license-info', async () => {
     // role: "owner" = KEY hệ thống (bearer token khớp API_TOKEN bí mật của Worker, xem
     // auth.ts::authorize), "desktop" = KEY khách hàng thường — renderer dùng field này để
     // ẩn/hiện Nhật ký tiến trình (xem dist/index.html, hàm applySystemKeyVisibility).
-    return { ok: true, license: data.license, role: data.role };
+    // quota: lượt upload/tạo nhạc còn lại hôm nay (xem worker/src/quota.ts::getQuotaStatus).
+    return { ok: true, license: data.license, role: data.role, quota: data.quota };
   } catch (e) {
     return { ok: false, message: e.message || 'Không lấy được thông tin Key.' };
   }

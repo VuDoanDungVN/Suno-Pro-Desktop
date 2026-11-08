@@ -108,6 +108,7 @@ export async function runStudioReverseAutomation(
     // Studio 2.0" mới vào được — tự bấm hộ mỗi vòng poll.
     const chatDeadline = Date.now() + 90000;
     let foundChat = false;
+    let redirectedFromWelcome = false;
     while (Date.now() < chatDeadline) {
       await page
         .evaluate(`
@@ -119,13 +120,50 @@ export async function runStudioReverseAutomation(
           })();
         `)
         .catch(() => false);
+      // Project mở lần đầu đôi khi bị Suno chuyển sang "/studio-welcome" (màn giới thiệu) — không
+      // có ô chat ở đây. Thử bấm bất kỳ nút nào có vẻ là "tiếp tục/bắt đầu" mỗi vòng poll. Chỉ
+      // console.log danh sách tên nút DUY NHẤT 1 lần để chẩn đoán (không lộ ra client khi lỗi).
+      const welcomeInfo = (await page
+        .evaluate(
+          `
+          (function () {
+            if (location.pathname.indexOf('studio-welcome') === -1) return { onWelcome: false, clicked: false };
+            ${CLICK_HELPER}
+            const btns = Array.from(document.querySelectorAll('button'));
+            const texts = btns.map((b) => (b.textContent || '').trim()).filter(Boolean);
+            const re = /continue|get started|start|go|enter|open|skip|tiếp tục|bắt đầu/i;
+            const btn = btns.find((b) => re.test((b.textContent || '').trim()));
+            const clicked = btn ? __spClick(btn) : false;
+            return { onWelcome: true, clicked: !!clicked, buttonTexts: texts };
+          })();
+        `,
+        )
+        .catch(() => ({ onWelcome: false, clicked: false }))) as { onWelcome: boolean; clicked: boolean; buttonTexts?: string[] };
+      if (welcomeInfo.onWelcome && !redirectedFromWelcome) {
+        redirectedFromWelcome = true;
+        const diagLine = `Đang ở trang "studio-welcome" — các nút tìm thấy: ${JSON.stringify(welcomeInfo.buttonTexts)}, đã bấm nút khớp từ khoá: ${welcomeInfo.clicked ? 'có' : 'không'}`;
+        log(diagLine);
+        console.log(diagLine);
+      }
       foundChat = Boolean(
         await page.evaluate(`!!document.querySelector('textarea[aria-label="Magic Bar prompt"]')`),
       );
       if (foundChat) break;
       await sleep(1000);
     }
-    if (!foundChat) throw new Error('Không thấy ô chat của Suno Studio (giao diện có thể đã đổi).');
+    if (!foundChat) {
+      // Chẩn đoán: URL/title thực tế lúc timeout — phân biệt "trang Suno đổi giao diện" với "bị
+      // redirect sang trang khác hẳn" (login hết hạn, rate-limit, captcha…).
+      const diag = await page
+        .evaluate(`({ url: location.href, title: document.title, bodyLen: (document.body && document.body.innerText || '').length })`)
+        .catch(() => null);
+      const diagLine = `Chẩn đoán lúc timeout: ${diag ? JSON.stringify(diag) : 'không lấy được URL/title trang'}`;
+      log(diagLine);
+      // `log()` chỉ đẩy vào mảng trả về cho client — bị mất khi throw (xem suno-proxy.ts, chỉ trả
+      // `logs` lúc THÀNH CÔNG). console.log thêm ở đây để còn thấy được qua `wrangler tail`.
+      console.log(diagLine);
+      throw new Error('Không thấy ô chat của Suno Studio (giao diện có thể đã đổi).');
+    }
 
     // Audio được vẽ bằng <canvas> (Three.js) — chọn track qua ".track-header-row" ở panel trái
     // rồi bấm "Add to prompt". Panel track hydrate chậm hơn ô chat — đợi riêng tối đa 30s.
@@ -155,7 +193,7 @@ export async function runStudioReverseAutomation(
               if (!canvas || !header) return false;
               const cRect = canvas.getBoundingClientRect();
               const hRect = header.getBoundingClientRect();
-              const x = cRect.left + cRect.width * 0.3;
+              const x = cRect.left + cRect.width * 0.25;
               const y = hRect.top + hRect.height / 2;
               return __spClick(canvas, x, y);
             })();
@@ -191,41 +229,56 @@ export async function runStudioReverseAutomation(
     // Đảo audio qua 2 bước trong panel "Clip editor" (icon nằm trong track header, cạnh Add to
     // prompt) — KHÔNG dùng id/class của nút (do thư viện Base UI sinh ngẫu nhiên mỗi lần render,
     // không ổn định), chọn bằng aria-label/data-info-target. Thay thế hoàn toàn 2 lệnh chat AI cũ.
-    const clipEditorClicked = Boolean(
-      await page
-        .evaluate(`
-          (function () {
-            ${CLICK_HELPER}
-            const btn = document.querySelector('button[aria-label="Clip editor"][data-info-target="clip-editor"]');
-            if (!btn || btn.disabled) return false;
-            return __spClick(btn);
-          })();
-        `)
-        .catch(() => false),
+    // "Clip editor" là nút TOGGLE (bấm lần 2 sẽ ĐÓNG panel đang mở) — chỉ bấm khi panel (nút
+    // Reverse) CHƯA hiện sẵn, tránh tự đóng mất panel vừa mở ở 1 lần thử trước đó.
+    const reversePanelAlreadyOpen = Boolean(
+      await page.evaluate(`!!document.querySelector('button[data-info-target="clip-reverse"]')`).catch(() => false),
     );
-    if (!clipEditorClicked) {
-      throw new Error('Không bấm được nút "Clip editor" để mở panel đảo audio (giao diện có thể đã đổi).');
+    if (!reversePanelAlreadyOpen) {
+      const clipEditorClicked = Boolean(
+        await page
+          .evaluate(`
+            (function () {
+              ${CLICK_HELPER}
+              const btn = document.querySelector('button[aria-label="Clip editor"][data-info-target="clip-editor"]');
+              if (!btn || btn.disabled) return false;
+              return __spClick(btn);
+            })();
+          `)
+          .catch(() => false),
+      );
+      if (!clipEditorClicked) {
+        throw new Error('Không bấm được nút "Clip editor" để mở panel đảo audio (giao diện có thể đã đổi).');
+      }
+      log('Đã bấm "Clip editor", đợi panel mở ra (tối đa 30 giây)…');
+    } else {
+      log('Panel "Clip editor" đã mở sẵn, bỏ qua bấm (nút toggle — bấm lại sẽ đóng panel).');
     }
-    log('Đã bấm "Clip editor", đợi 10 giây cho panel mở ra rồi bấm "Reverse"…');
-    await sleep(10000);
 
-    const reverseClicked = Boolean(
-      await page
-        .evaluate(`
-          (function () {
-            ${CLICK_HELPER}
-            const btn = document.querySelector('button[data-info-target="clip-reverse"]');
-            if (!btn || btn.disabled) return false;
-            return __spClick(btn);
-          })();
-        `)
-        .catch(() => false),
-    );
+    // Chờ nút Reverse XUẤT HIỆN (poll, không chờ cứng 1 khoảng cố định) — panel đôi lúc render
+    // chậm hơn 10s, trước đây chờ cứng rồi thử đúng 1 lần nên hay trượt.
+    const reverseDeadline = Date.now() + 30000;
+    let reverseClicked = false;
+    while (Date.now() < reverseDeadline && !reverseClicked) {
+      reverseClicked = Boolean(
+        await page
+          .evaluate(`
+            (function () {
+              ${CLICK_HELPER}
+              const btn = document.querySelector('button[data-info-target="clip-reverse"]');
+              if (!btn || btn.disabled) return false;
+              return __spClick(btn);
+            })();
+          `)
+          .catch(() => false),
+      );
+      if (!reverseClicked) await sleep(500);
+    }
     if (!reverseClicked) {
       throw new Error('Không bấm được nút "Reverse" để đảo audio (giao diện có thể đã đổi).');
     }
-    log('Đã bấm "Reverse", đợi 10 giây…');
-    await sleep(10000);
+    log('Đã bấm "Reverse", đợi 20 giây…');
+    await sleep(20000);
 
     // Điền Pitch vào ô "Semitones" của panel Clip editor — chỉ khi khác 0 (giữ hành vi cũ khi
     // Pitch = 0, không đụng gì tới ô này). ĐẢO DẤU so với giá trị người dùng chọn ở app (client
