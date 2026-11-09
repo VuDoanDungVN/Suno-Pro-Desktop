@@ -58,6 +58,13 @@ export interface StudioAutomationLogger {
   (line: string): void;
 }
 
+// Nội dung 2 câu lệnh gửi AI Studio — khôi phục lại từ commit 8db89cf (trước cb49db6 thay sang
+// bấm nút "Clip editor"/"Reverse" trực tiếp).
+const FIXED_PROMPT =
+  'Reverse lại audio này cho tôi. Lưu ý : Không được split cắt đoạn audio, chỉ reverse toàn bộ audio. Đảm bảo audio được reverse đúng và đầy đủ.';
+const FOLLOWUP_PROMPT =
+  'Đảm bảo audio phải đủ thời lượng không bị cắt (no split), đặc biệt phải so sánh audio upload và audio sau khi xử lý Reverse phải có thời lượng bằng nhau.';
+
 /** Chạy toàn bộ bước 8 (gửi lệnh AI Studio + Export → Full Song) trên 1 trình duyệt headless của
  * Cloudflare Browser Rendering. Ném lỗi nếu bất kỳ bước bắt buộc nào thất bại — giống hệt hành vi
  * cũ (không có bước nào được phép "best-effort" ngầm ngoài những chỗ bản gốc đã cho phép). */
@@ -193,7 +200,7 @@ export async function runStudioReverseAutomation(
               if (!canvas || !header) return false;
               const cRect = canvas.getBoundingClientRect();
               const hRect = header.getBoundingClientRect();
-              const x = cRect.left + cRect.width * 0.25;
+              const x = cRect.left + cRect.width * 0.3;
               const y = hRect.top + hRect.height / 2;
               return __spClick(canvas, x, y);
             })();
@@ -226,109 +233,89 @@ export async function runStudioReverseAutomation(
     }
     await sleep(500);
 
-    // Đảo audio qua 2 bước trong panel "Clip editor" (icon nằm trong track header, cạnh Add to
-    // prompt) — KHÔNG dùng id/class của nút (do thư viện Base UI sinh ngẫu nhiên mỗi lần render,
-    // không ổn định), chọn bằng aria-label/data-info-target. Thay thế hoàn toàn 2 lệnh chat AI cũ.
-    // "Clip editor" là nút TOGGLE (bấm lần 2 sẽ ĐÓNG panel đang mở) — chỉ bấm khi panel (nút
-    // Reverse) CHƯA hiện sẵn, tránh tự đóng mất panel vừa mở ở 1 lần thử trước đó.
-    const reversePanelAlreadyOpen = Boolean(
-      await page.evaluate(`!!document.querySelector('button[data-info-target="clip-reverse"]')`).catch(() => false),
-    );
-    if (!reversePanelAlreadyOpen) {
-      const clipEditorClicked = Boolean(
-        await page
-          .evaluate(`
-            (function () {
-              ${CLICK_HELPER}
-              const btn = document.querySelector('button[aria-label="Clip editor"][data-info-target="clip-editor"]');
-              if (!btn || btn.disabled) return false;
-              return __spClick(btn);
-            })();
-          `)
-          .catch(() => false),
-      );
-      if (!clipEditorClicked) {
-        throw new Error('Không bấm được nút "Clip editor" để mở panel đảo audio (giao diện có thể đã đổi).');
-      }
-      log('Đã bấm "Clip editor", đợi panel mở ra (tối đa 30 giây)…');
-    } else {
-      log('Panel "Clip editor" đã mở sẵn, bỏ qua bấm (nút toggle — bấm lại sẽ đóng panel).');
-    }
-
-    // Chờ nút Reverse XUẤT HIỆN (poll, không chờ cứng 1 khoảng cố định) — panel đôi lúc render
-    // chậm hơn 10s, trước đây chờ cứng rồi thử đúng 1 lần nên hay trượt.
-    const reverseDeadline = Date.now() + 30000;
-    let reverseClicked = false;
-    while (Date.now() < reverseDeadline && !reverseClicked) {
-      reverseClicked = Boolean(
-        await page
-          .evaluate(`
-            (function () {
-              ${CLICK_HELPER}
-              const btn = document.querySelector('button[data-info-target="clip-reverse"]');
-              if (!btn || btn.disabled) return false;
-              return __spClick(btn);
-            })();
-          `)
-          .catch(() => false),
-      );
-      if (!reverseClicked) await sleep(500);
-    }
-    if (!reverseClicked) {
-      throw new Error('Không bấm được nút "Reverse" để đảo audio (giao diện có thể đã đổi).');
-    }
-    log('Đã bấm "Reverse", đợi 20 giây…');
-    await sleep(20000);
-
-    // Điền Pitch vào ô "Semitones" của panel Clip editor — chỉ khi khác 0 (giữ hành vi cũ khi
-    // Pitch = 0, không đụng gì tới ô này). ĐẢO DẤU so với giá trị người dùng chọn ở app (client
-    // đã áp dụng pitchShiftAudioLocally() cục bộ với NGUYÊN giá trị gốc trước khi upload — ví dụ
-    // chọn −2 nửa cung thì audio cục bộ đã bị hạ 2 nửa cung; ô Semitones ở đây theo đúng yêu cầu
-    // phải nhận +2, ngược dấu). App cho chọn tới ±40 nửa cung (±20 cung) nhưng ô "Semitones" THẬT
-    // của Suno Studio chỉ nhận −24..+24 — clamp riêng CHỈ cho giá trị điền vào ô này, không đụng
-    // gì tới giá trị đã áp dụng cục bộ (pitchRawFromClient giữ nguyên để pitch-shift cục bộ không
-    // bị cắt). Input React-controlled nên phải gán qua native setter + bắn 'input' rồi 'change'
-    // mới được component ghi nhận (giống cách gõ lệnh chat cũ), blur để component commit giá trị
-    // cuối cùng.
-    const pitchRawFromClient = Math.round(Number(opts.pitchSemitones) || 0);
-    const pitchClampedForSuno = Math.max(-24, Math.min(24, pitchRawFromClient));
-    const semitonesInputValue = -pitchClampedForSuno;
-    if (pitchRawFromClient !== 0) {
-      const pitchSet = Boolean(
-        await page
-          .evaluate(`
-            (function () {
-              const input = document.querySelector('input[aria-label="Semitones"]');
-              if (!input) return false;
-              const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-              setter.call(input, ${JSON.stringify(String(semitonesInputValue))});
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-              input.dispatchEvent(new Event('change', { bubbles: true }));
-              input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', code: 'Enter' }));
-              input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter', code: 'Enter' }));
-              input.blur();
-              return true;
-            })();
-          `)
-          .catch(() => false),
-      );
-      if (!pitchSet) {
-        throw new Error('Không nhập được giá trị Pitch vào ô "Semitones" (giao diện có thể đã đổi).');
-      }
-      await sleep(500);
-      const committedValue = await page
-        .evaluate(`
+    // Gõ 1 lệnh (qua native setter vì React không nhận .value gán trực tiếp), bấm Send, theo dõi
+    // nút Send (bận → rảnh) để biết AI xử lý xong hay chưa, cắt cứng sau `pollMs` nếu chưa rõ.
+    // Khôi phục lại cơ chế gửi 2 lệnh chat cho AI Studio (bản trước commit cb49db6) thay cho việc
+    // bấm nút "Clip editor"/"Reverse" trực tiếp trên UI.
+    const sendAndWait = async (msg: string, pollMs: number, label: string): Promise<boolean> => {
+      const sentNow = Boolean(
+        await page.evaluate(`
           (function () {
-            const input = document.querySelector('input[aria-label="Semitones"]');
-            return input ? input.getAttribute('aria-valuenow') : null;
+            const ta = document.querySelector('textarea[aria-label="Magic Bar prompt"]');
+            if (!ta) return false;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            setter.call(ta, ${JSON.stringify(msg)});
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
           })();
-        `)
-        .catch(() => null);
-      const clampNote = pitchClampedForSuno !== pitchRawFromClient ? ` (đã giới hạn từ ${pitchRawFromClient} vì ô Semitones chỉ nhận −24..+24)` : '';
-      log(`Pitch người dùng chọn = ${pitchRawFromClient} nửa cung — đã nhập ${semitonesInputValue} (đảo dấu${clampNote}) vào ô "Semitones" (giá trị hiện tại đọc lại từ Suno Studio: ${committedValue === null ? 'không đọc được' : committedValue}).`);
-    } else {
-      log('Pitch = 0 — không cần nhập ô "Semitones".');
-    }
+        `),
+      );
+      if (!sentNow) throw new Error(`Không gõ được lệnh vào ô chat (${label}).`);
+
+      await sleep(400);
+      const clickedNow = Boolean(
+        await page.evaluate(`
+          (function () {
+            const btn = document.querySelector('button[aria-label="Send"]');
+            if (!btn || btn.disabled) return false;
+            btn.click();
+            return true;
+          })();
+        `),
+      );
+      if (!clickedNow) throw new Error(`Nút Gửi không bật lên được (${label}) — có thể ô chat đang bị khoá/đã có lệnh khác đang chạy.`);
+
+      log(`Đã bấm Gửi (${label}), đang theo dõi trạng thái AI Studio…`);
+      let sawBusyNow = false;
+      let settledNow = false;
+      let nullStreakNow = 0;
+      const deadlineNow = Date.now() + pollMs;
+      let lastLogAtNow = 0;
+      while (Date.now() < deadlineNow) {
+        const busyRaw = await page
+          .evaluate(`
+            (function () {
+              const btn = document.querySelector('button[aria-label="Send"]');
+              return btn ? !!btn.disabled : null;
+            })();
+          `)
+          .catch(() => null);
+        const busy = busyRaw as boolean | null;
+        if (busy === true) {
+          sawBusyNow = true;
+          nullStreakNow = 0;
+        } else if (busy === false) {
+          nullStreakNow = 0;
+          if (sawBusyNow) {
+            settledNow = true;
+            break;
+          }
+        } else if (busy === null && sawBusyNow) {
+          nullStreakNow++;
+          if (nullStreakNow >= 5) {
+            settledNow = true;
+            break;
+          }
+        }
+        if (Date.now() - lastLogAtNow > 10000) {
+          lastLogAtNow = Date.now();
+          log(
+            `…(${label}) vẫn đang theo dõi AI Studio (đã thấy bận: ${sawBusyNow ? 'có' : 'chưa'}, trạng thái nút hiện tại: ${busy === null ? 'không tìm thấy' : busy ? 'bận' : 'rảnh'})`,
+          );
+        }
+        await sleep(2000);
+      }
+      if (settledNow) {
+        log(`(${label}) Nút Gửi đã bật lại (hoặc mất dấu sau khi bận) — coi như AI Studio đã xử lý xong.`);
+      } else {
+        log(`(${label}) Hết ${Math.round(pollMs / 1000)}s theo yêu cầu — tiếp tục dù chưa chắc AI đã xử lý xong.`);
+      }
+      return settledNow;
+    };
+
+    const settledByPoll1 = await sendAndWait(FIXED_PROMPT, 20000, 'lệnh 1/2 — reverse');
+    const settledByPoll2 = await sendAndWait(FOLLOWUP_PROMPT, 10000, 'lệnh 2/2 — nhắc không cắt');
+    const settledByPoll = settledByPoll1 && settledByPoll2;
 
     // QUAN TRỌNG: thay đổi vừa làm chỉ cập nhật trạng thái TẠM THỜI trong trình duyệt — CHƯA lưu
     // xuống server. Render phía sau (Worker) đọc lại state qua GET /api/studio/project, nên nếu
@@ -379,7 +366,7 @@ export async function runStudioReverseAutomation(
     log('Đã thấy toast "Song Saved!" — project đã lưu xong, đợi thêm 2s cho chắc…');
     await sleep(2000);
 
-    return { ok: true, settledByPoll: true };
+    return { ok: true, settledByPoll };
   } finally {
     await browser.close();
   }
