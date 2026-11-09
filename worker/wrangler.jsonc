@@ -19,6 +19,15 @@
   // ngay trên server thay vì mở cửa sổ trên máy người dùng. Yêu cầu Workers Paid (xem
   // https://developers.cloudflare.com/browser-rendering/platform/limits/).
   "browser": { "binding": "BROWSER" },
+  // Hàng đợi công bằng cho automate-reverse khi nhiều người dùng cùng lúc — xem
+  // src/studio-queue-do.ts (lớp StudioQueueDO export từ src/index.ts). Tag migration mới
+  // (v3, không dùng lại v1-studio-queue) vì tag đó đã từng tạo RỒI xoá trên worker staging ở một
+  // nhánh thử nghiệm trước — dùng lại tag cũ có thể bị Cloudflare coi là "đã áp dụng", không tạo
+  // lại class.
+  "durable_objects": {
+    "bindings": [{ "name": "STUDIO_QUEUE", "class_name": "StudioQueueDO" }]
+  },
+  "migrations": [{ "tag": "v3-studio-queue-reintroduce", "new_sqlite_classes": ["StudioQueueDO"] }],
 
   // Môi trường thử nghiệm — deploy: npx wrangler deploy --env staging
   // Worker riêng (suno-pro-worker-staging) + D1 riêng (suno-pro-db-staging), không đụng tới
@@ -34,7 +43,10 @@
           "migrations_dir": "./migrations"
         }
       ],
-      "browser": { "binding": "BROWSER" }
+      "browser": { "binding": "BROWSER" },
+      "durable_objects": {
+        "bindings": [{ "name": "STUDIO_QUEUE", "class_name": "StudioQueueDO" }]
+      }
     }
   }
 }

@@ -69,10 +69,12 @@ const FOLLOWUP_PROMPT =
  * Cloudflare Browser Rendering. Ném lỗi nếu bất kỳ bước bắt buộc nào thất bại — giống hệt hành vi
  * cũ (không có bước nào được phép "best-effort" ngầm ngoài những chỗ bản gốc đã cho phép). */
 // Cloudflare Browser Rendering tự giới hạn số browser tạo mới trong 1 khoảng thời gian (429
-// "Rate limit exceeded") — xảy ra khi test liên tục nhiều lần sát nhau. Thử lại tối đa 5 lần,
-// chờ tăng dần (3s/6s/9s/12s), chỉ với đúng lỗi 429 này (lỗi khác ném ra ngay, thử lại vô ích).
+// "Rate limit exceeded") — xảy ra khi test liên tục nhiều lần sát nhau. Thử lại tối đa 8 lần
+// (tăng từ 5 — lúc nhiều người dùng cùng chạy automation, hạn mức số phiên Browser Rendering
+// đồng thời dễ bị chạm trần tạm thời), chờ tăng dần (3s/6s/9s/.../24s), chỉ với đúng lỗi 429 này
+// (lỗi khác ném ra ngay, thử lại vô ích).
 async function launchBrowserWithRetry(env: Env, log: StudioAutomationLogger) {
-  const MAX_ATTEMPTS = 5;
+  const MAX_ATTEMPTS = 8;
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
@@ -95,7 +97,14 @@ export async function runStudioReverseAutomation(
   log: StudioAutomationLogger = () => {},
 ): Promise<StudioAutomationResult> {
   const browser = await launchBrowserWithRetry(env, log);
+  // Deadline TỔNG cho toàn bộ quy trình (sau khi đã mở được trình duyệt) — tránh treo vô hạn chờ
+  // Cloudflare tự đóng phiên khi máy chủ Browser Rendering quá tải (nhiều người dùng cùng lúc).
+  // `currentStep` được từng đoạn tự cập nhật để thông báo timeout nói rõ đang kẹt ở bước nào,
+  // thay vì chỉ báo "quá giờ" chung chung.
+  const OVERALL_DEADLINE_MS = 7 * 60 * 1000;
+  let currentStep = "Đang khởi tạo phiên Suno Studio";
   try {
+    const work = (async (): Promise<StudioAutomationResult> => {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 900 });
 
@@ -108,12 +117,15 @@ export async function runStudioReverseAutomation(
       await page.setCookie(...(cookies as any));
     }
 
+    currentStep = "Đang mở trang Suno Studio";
     await page.goto(opts.studioUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     // Ô chat chỉ xuất hiện SAU KHI app Studio (React) tải/khởi tạo xong — poll tới khi thấy, tối
-    // đa 90s. Project tạo từ Studio bản cũ sẽ hiện hộp thoại chặn giữa màn hình, bắt bấm "Open in
-    // Studio 2.0" mới vào được — tự bấm hộ mỗi vòng poll.
-    const chatDeadline = Date.now() + 90000;
+    // đa 150s (nới từ 90s — mạng/máy chủ Browser Rendering chậm lúc đông người dùng cần nhiều
+    // thời gian hơn). Project tạo từ Studio bản cũ sẽ hiện hộp thoại chặn giữa màn hình, bắt bấm
+    // "Open in Studio 2.0" mới vào được — tự bấm hộ mỗi vòng poll.
+    currentStep = "Đang chờ ô chat Suno Studio sẵn sàng";
+    const chatDeadline = Date.now() + 150000;
     let foundChat = false;
     let redirectedFromWelcome = false;
     while (Date.now() < chatDeadline) {
@@ -169,13 +181,15 @@ export async function runStudioReverseAutomation(
       // `log()` chỉ đẩy vào mảng trả về cho client — bị mất khi throw (xem suno-proxy.ts, chỉ trả
       // `logs` lúc THÀNH CÔNG). console.log thêm ở đây để còn thấy được qua `wrangler tail`.
       console.log(diagLine);
-      throw new Error('Không thấy ô chat của Suno Studio (giao diện có thể đã đổi).');
+      throw new Error('Không thấy ô chat của Suno Studio sau 150s (giao diện có thể đã đổi, hoặc máy chủ Browser Rendering đang quá tải vì nhiều người dùng cùng lúc).');
     }
 
     // Audio được vẽ bằng <canvas> (Three.js) — chọn track qua ".track-header-row" ở panel trái
-    // rồi bấm "Add to prompt". Panel track hydrate chậm hơn ô chat — đợi riêng tối đa 30s.
+    // rồi bấm "Add to prompt". Panel track hydrate chậm hơn ô chat — đợi riêng tối đa 60s (nới từ
+    // 30s, cùng lý do nới chatDeadline ở trên).
+    currentStep = "Đang chờ panel track xuất hiện";
     log('Đã thấy ô chat, đang đợi panel track xuất hiện…');
-    const trackDeadline = Date.now() + 30000;
+    const trackDeadline = Date.now() + 60000;
     let hasTrackHeader = false;
     while (Date.now() < trackDeadline) {
       hasTrackHeader = Boolean(
@@ -188,6 +202,7 @@ export async function runStudioReverseAutomation(
 
     // Chọn track + đính kèm vào chat — xác minh bằng "chip" (nút "Remove <tên track>"), thử lại
     // tối đa 8 lần vì .click() tổng hợp thường không đủ để component chọn track ghi nhận.
+    currentStep = "Đang chọn track + đính kèm vào chat (Add to prompt)";
     let addedToPrompt = false;
     for (let attempt = 0; attempt < 8 && !addedToPrompt; attempt++) {
       const canvasClicked = Boolean(
@@ -237,6 +252,7 @@ export async function runStudioReverseAutomation(
     // nút Send (bận → rảnh) để biết AI xử lý xong hay chưa, cắt cứng sau `pollMs` nếu chưa rõ.
     // Khôi phục lại cơ chế gửi 2 lệnh chat cho AI Studio (bản trước commit cb49db6) thay cho việc
     // bấm nút "Clip editor"/"Reverse" trực tiếp trên UI.
+    currentStep = "Đang gửi lệnh cho AI Studio";
     const sendAndWait = async (msg: string, pollMs: number, label: string): Promise<boolean> => {
       const sentNow = Boolean(
         await page.evaluate(`
@@ -321,6 +337,7 @@ export async function runStudioReverseAutomation(
     // xuống server. Render phía sau (Worker) đọc lại state qua GET /api/studio/project, nên nếu
     // chưa lưu thì vẫn đọc phải bản GỐC chưa đảo chiều. Lưu CHỈ xảy ra khi bấm Export →
     // "Full Song" (lúc đó mới hiện toast "Song Saved!") — bước bắt buộc, không phải chờ cho có.
+    currentStep = "Đang bấm Export → Full Song";
     log('Đang lưu project (bấm Export → Full Song) — bước bắt buộc để Render lấy đúng bản đã đảo chiều…');
     const exportMenuOpened = Boolean(
       await page
@@ -351,7 +368,9 @@ export async function runStudioReverseAutomation(
       throw new Error('Không bấm được Export → Full Song để lưu project (giao diện có thể đã đổi).');
     }
 
-    const saveDeadline = Date.now() + 90000;
+    currentStep = 'Đang chờ toast "Song Saved!" xác nhận đã lưu';
+    // Nới 90s→150s cùng lý do nới các deadline khác trong file này.
+    const saveDeadline = Date.now() + 150000;
     let savedToastSeen = false;
     while (Date.now() < saveDeadline) {
       savedToastSeen = Boolean(
@@ -361,12 +380,24 @@ export async function runStudioReverseAutomation(
       await sleep(1000);
     }
     if (!savedToastSeen) {
-      throw new Error('Đã bấm Export → Full Song nhưng không thấy toast "Song Saved!" xác nhận đã lưu (quá 90s).');
+      throw new Error('Đã bấm Export → Full Song nhưng không thấy toast "Song Saved!" xác nhận đã lưu sau 150s (có thể do máy chủ đang quá tải vì nhiều người dùng cùng lúc).');
     }
     log('Đã thấy toast "Song Saved!" — project đã lưu xong, đợi thêm 2s cho chắc…');
     await sleep(2000);
 
-    return { ok: true, settledByPoll };
+      return { ok: true, settledByPoll };
+    })();
+
+    const timeout = new Promise<StudioAutomationResult>((_, reject) => {
+      setTimeout(() => {
+        reject(
+          new Error(
+            `Quá thời gian xử lý (vượt ${Math.round(OVERALL_DEADLINE_MS / 1000)}s) khi đang ở bước: "${currentStep}" — có thể do máy chủ Browser Rendering đang quá tải vì nhiều người dùng cùng lúc. Vui lòng thử lại sau ít phút.`,
+          ),
+        );
+      }, OVERALL_DEADLINE_MS);
+    });
+    return await Promise.race([work, timeout]);
   } finally {
     await browser.close();
   }

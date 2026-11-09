@@ -9,6 +9,9 @@
 // app cài trên máy khách đã bị patch bỏ phần kiểm tra license hay chưa.
 
 import { CORS_HEADERS, HttpError, json, readJson } from "./http";
+// Durable Object (hàng đợi automate-reverse) — PHẢI export từ module chính (file "main" trong
+// wrangler.jsonc) để Cloudflare nhận diện được class khi deploy, xem studio-queue-do.ts.
+export { StudioQueueDO } from "./studio-queue-do";
 import {
   Ctx,
   activate,
@@ -61,7 +64,8 @@ import {
   studioExportStart,
   studioExportStatus,
   studioInspect,
-  studioAutomateReverse,
+  studioAutomateReverseStart,
+  studioAutomateReverseStatus,
   trashClip,
   uploadFinish,
   uploadInit,
@@ -229,9 +233,13 @@ async function routeSuno(pathname: string, method: string, request: Request, env
     requireApp(ctx);
     return studioInspect(request, env);
   }
-  if (pathname === "/suno/studio/automate-reverse" && method === "POST") {
+  if (pathname === "/suno/studio/automate-reverse/start" && method === "POST") {
     requireApp(ctx);
-    return studioAutomateReverse(request, env);
+    return studioAutomateReverseStart(request, env, ctx.licenseId);
+  }
+  if (pathname === "/suno/studio/automate-reverse/status" && method === "GET") {
+    requireApp(ctx);
+    return studioAutomateReverseStatus(request, env);
   }
   if (pathname === "/suno/studio/export/start" && method === "POST") {
     requireApp(ctx);

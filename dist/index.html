@@ -1392,6 +1392,7 @@
               <input type="text" id="genCoverSearchInput" class="suno-session-input gen-full-width" placeholder="Tìm bài hát trên Suno…" autocomplete="off" spellcheck="false">
               <div id="genCoverList" class="gen-cover-list"></div>
               <button id="genCoverLoadMoreBtn" class="suno-test-btn suno-full-width-btn" type="button" style="margin-top:6px;" hidden>Tải thêm</button>
+              <button id="genCoverRefreshBtn" class="suno-test-btn suno-full-width-btn" type="button" style="margin-top:6px;" title="Tải lại danh sách từ đầu — lấy cả bài mới upload sau khi mở popup này">🔄 Làm mới</button>
             </div>
 
             <label class="field-label-sm" for="genLyricsInput" style="margin-top:12px;">Lời bài hát:</label>
@@ -2077,6 +2078,14 @@
           && typeof window.electronAPI.debugLog === 'function') {
         window.electronAPI.onSunoUploadProgress(function (msg) {
           window.electronAPI.debugLog('[suno] ' + msg);
+          // Cảnh báo giới hạn tốc độ (429), đang xếp hàng xử lý Studio (hàng đợi công bằng —
+          // xem worker/src/studio-queue-do.ts), hay đang xử lý tới bước nào: không chỉ ghi
+          // debug.log im lặng, hiện trực tiếp lên dòng trạng thái popup Reverse (xem
+          // window.sunoShowRateLimitNotice ở block Reverse pipeline).
+          if (/giới hạn tốc độ|Đang xếp hàng|Đang xử lý trên Suno Studio|Đã xử lý xong trên Suno Studio/i.test(msg)
+              && typeof window.sunoShowRateLimitNotice === 'function') {
+            window.sunoShowRateLimitNotice(msg);
+          }
         });
       }
 
@@ -2500,6 +2509,7 @@
       var genCoverSearchInput = document.getElementById('genCoverSearchInput');
       var genCoverList = document.getElementById('genCoverList');
       var genCoverLoadMoreBtn = document.getElementById('genCoverLoadMoreBtn');
+      var genCoverRefreshBtn = document.getElementById('genCoverRefreshBtn');
       var genAudioInfluenceRow = document.getElementById('genAudioInfluenceRow');
       var genAudioInfluenceSlider = document.getElementById('genAudioInfluenceSlider');
       var genAudioInfluenceVal = document.getElementById('genAudioInfluenceVal');
@@ -2740,6 +2750,8 @@
         });
       }
       if (genCoverLoadMoreBtn) genCoverLoadMoreBtn.addEventListener('click', function () { genLoadCoverSongs(genCoverCursor, true); });
+      // Tải lại từ đầu — lấy được cả những bài vừa upload sau khi popup Cover đã mở.
+      if (genCoverRefreshBtn) genCoverRefreshBtn.addEventListener('click', function () { genLoadCoverSongs(null, false); });
       if (genCoverSearchInput) {
         genCoverSearchInput.addEventListener('input', function () {
           var q = genCoverSearchInput.value.trim().toLowerCase();
@@ -3892,6 +3904,12 @@
         pumpQueue();
       }
 
+      // Giới hạn tốc độ upload liên tiếp (file thường và YouTube hàng loạt dùng
+      // CHUNG hàng đợi này): nghỉ tối thiểu 30s giữa khi 1 bài xong và lúc bài
+      // kế tiếp bắt đầu, để không dồn dập request lên Suno gây 429.
+      var SUNO_QUEUE_MIN_GAP_MS = 30000;
+      var sunoQueueLastFinishedAt = 0;
+
       function pumpQueue() {
         if (sunoQueueRunning) return;
         var next = null;
@@ -3905,10 +3923,33 @@
         }
         sunoQueueRunning = true;
         setQueueButtonsDisabled(true);
-        runQueueItem(next).catch(function () {}).then(function () {
-          sunoQueueRunning = false;
-          pumpQueue();
-        });
+
+        function startNow() {
+          runQueueItem(next).catch(function () {}).then(function () {
+            sunoQueueLastFinishedAt = Date.now();
+            sunoQueueRunning = false;
+            pumpQueue();
+          });
+        }
+
+        var waitMs = sunoQueueLastFinishedAt ? Math.max(0, SUNO_QUEUE_MIN_GAP_MS - (Date.now() - sunoQueueLastFinishedAt)) : 0;
+        if (waitMs <= 0 || sunoQueueStopRequested) {
+          startNow();
+          return;
+        }
+        var remaining = Math.ceil(waitMs / 1000);
+        next.phase = 'Đang chờ ' + remaining + 's trước khi xử lý (tránh upload liên tiếp quá nhanh)…';
+        renderQueue();
+        var tick = setInterval(function () {
+          remaining--;
+          if (remaining > 0 && !sunoQueueStopRequested) {
+            next.phase = 'Đang chờ ' + remaining + 's trước khi xử lý (tránh upload liên tiếp quá nhanh)…';
+            renderQueue();
+          } else {
+            clearInterval(tick);
+            startNow();
+          }
+        }, 1000);
       }
 
       function runQueueItem(item) {
@@ -5493,6 +5534,14 @@
       statusEl.textContent = text;
       statusEl.className = 'suno-status' + (cls ? ' ' + cls : '');
     }
+
+    // Gọi từ onSunoUploadProgress (block khác, xem dist/index.html phía trên) khi
+    // main.js đang tự chờ+đếm ngược do bị Suno giới hạn tốc độ (429) — hiện trực
+    // tiếp lên dòng trạng thái của popup Reverse mỗi giây, thay vì chỉ ghi log.
+    window.sunoShowRateLimitNotice = function (msg) {
+      setStatus('⏳ ' + msg, 'warn');
+      if (reverseStepLabel) reverseStepLabel.textContent = window.__sunoIsSystemKey ? msg : '';
+    };
 
     // Ghi vào debug.log (xem menu ☰ → Nhật ký tiến trình) — tag "[reverse]" để
     // lọc/tìm riêng, giữ nguyên ký hiệu ✗/✅/⚠/▶ để màn Nhật ký tự tô màu đúng

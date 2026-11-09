@@ -627,21 +627,38 @@ function requireSunoProLicense() {
 // Gọi 1 route trên Worker, đính kèm Bearer token license + x-device-id. Ném
 // lỗi rõ ràng nếu chưa kích hoạt; nếu Worker từ chối do license (401/403) thì
 // xoá token cục bộ luôn — tránh vòng lặp lỗi im lặng ở lần gọi kế tiếp.
-async function callSunoProWorker(pathName, body, method) {
+// timeoutMs (tuỳ chọn): CHỈ truyền cho các route có thể treo lâu bất thường
+// (ví dụ automate-reverse) — mặc định KHÔNG giới hạn (giữ nguyên hành vi cũ
+// cho mọi lệnh gọi khác, tránh ảnh hưởng ngoài ý muốn tới các flow đang chạy
+// ổn định như upload/poll trạng thái đã có cơ chế chờ riêng của chúng).
+async function callSunoProWorker(pathName, body, method, timeoutMs) {
   const license = sunoProLoadLicense();
   if (!license || !license.token) {
     throw new Error('Chưa kích hoạt Suno Pro. Hãy nhập Key kích hoạt trước.');
   }
   const httpMethod = method || 'POST';
-  const res = await fetch(SUNOPRO_WORKER_API + pathName, {
-    method: httpMethod,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${license.token}`,
-      'x-device-id': sunoProDeviceId()
-    },
-    ...(httpMethod === 'GET' ? {} : { body: JSON.stringify(body || {}) })
-  });
+  const ctrl = typeof timeoutMs === 'number' && timeoutMs > 0 ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  let res;
+  try {
+    res = await fetch(SUNOPRO_WORKER_API + pathName, {
+      method: httpMethod,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${license.token}`,
+        'x-device-id': sunoProDeviceId()
+      },
+      ...(httpMethod === 'GET' ? {} : { body: JSON.stringify(body || {}) }),
+      ...(ctrl ? { signal: ctrl.signal } : {})
+    });
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      throw new Error(`Quá thời gian xử lý (vượt ${Math.round(timeoutMs / 1000)}s) — có thể do mạng hoặc máy chủ Browser Rendering đang quá tải vì nhiều người dùng cùng lúc. Vui lòng kiểm tra lại trên Suno Studio (suno.com/studio) xem bài đã được lưu/đảo audio chưa, trước khi thử lại.`);
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   const text = await res.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch (e) { data = {}; }
@@ -1092,6 +1109,37 @@ ipcMain.handle('suno-notify', (event, payload) => {
   }
 });
 
+// Gặp 429 (Suno giới hạn tốc độ) ở bất kỳ bước upload nào: chờ (ưu tiên đúng
+// Retry-After thật nếu Suno có trả, mặc định ~60s) rồi tự thử lại — thay vì
+// dừng hẳn pipeline ngay. Đếm ngược được bắn qua progress() mỗi giây để
+// renderer hiển thị trực tiếp cho người dùng (xem dist/index.html,
+// onSunoUploadProgress + window.sunoShowRateLimitNotice).
+const RATE_LIMIT_MAX_RETRIES = 5;
+function isRateLimitError(err) {
+  if (!err) return false;
+  if (typeof err.retryAfterMs === 'number' && err.retryAfterMs >= 0) return true;
+  return /giới hạn tốc độ|rate.?limit|\b429\b/i.test(err.message || '');
+}
+async function waitWithRateLimitCountdown(progress, waitMs, label) {
+  const totalSec = Math.max(1, Math.ceil(waitMs / 1000));
+  for (let remaining = totalSec; remaining > 0; remaining--) {
+    progress(`⏳ Upload quá nhanh trong khoảng thời gian ngắn, hãy chậm lại và vui lòng chờ khoảng ${remaining} giây (Suno đang giới hạn tốc độ)${label ? ' — ' + label : ''}…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+async function withRateLimitRetry(progress, label, fn) {
+  for (let attempt = 1; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isRateLimitError(err) || attempt >= RATE_LIMIT_MAX_RETRIES) throw err;
+      const waitMs = Math.min(Math.max(err.retryAfterMs || 60000, 15000), 120000);
+      await waitWithRateLimitCountdown(progress, waitMs, label);
+      progress(`Đang thử lại: ${label}…`);
+    }
+  }
+}
+
 ipcMain.handle('suno-upload', async (event, payload) => {
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
   if (!payload.session || !payload.buffer) throw new Error('Thiếu session hoặc dữ liệu file');
@@ -1109,7 +1157,8 @@ ipcMain.handle('suno-upload', async (event, payload) => {
   // Bước 1-2: mở phiên upload qua Worker, rồi gửi BYTE file THẲNG lên presigned
   // URL S3 (không qua Worker) — y hệt luồng gốc, chỉ khác nơi xin presigned URL.
   progress('Đang mở phiên upload trên Suno…');
-  const init = await callSunoProWorker('/suno/upload/init', { token, cookieHeader, deviceId, extension: ext });
+  const init = await withRateLimitRetry(progress, 'mở phiên upload', () =>
+    callSunoProWorker('/suno/upload/init', { token, cookieHeader, deviceId, extension: ext }));
   progress('Đang tải file lên máy chủ Suno…');
   const form = new FormData();
   for (const [k, v] of Object.entries(init.fields || {})) form.append(k, String(v));
@@ -1120,15 +1169,30 @@ ipcMain.handle('suno-upload', async (event, payload) => {
   }
 
   progress('Đang báo Suno hoàn tất upload…');
-  await callSunoProWorker('/suno/upload/finish', { token, cookieHeader, deviceId, uploadId: init.id, filename: name });
+  await withRateLimitRetry(progress, 'báo hoàn tất upload', () =>
+    callSunoProWorker('/suno/upload/finish', { token, cookieHeader, deviceId, uploadId: init.id, filename: name }));
 
   // Bước 4: poll trạng thái — logic chờ/khoảng nghỉ giữ y nguyên, chỉ đổi nơi gọi.
-  const deadline = Date.now() + 5 * 60 * 1000;
+  // Gặp 429 giữa lúc poll: không tính thời gian chờ giới hạn tốc độ vào hạn mức
+  // 5 phút chờ Suno xử lý file — cộng thêm đúng thời gian đã chờ vào deadline.
+  let deadline = Date.now() + 5 * 60 * 1000;
   const pollStarted = Date.now();
   let lastProgress = 0;
   let status = null;
+  let rateLimitRetries = 0;
   while (Date.now() < deadline) {
-    status = await callSunoProWorker('/suno/upload/status', { token, cookieHeader, deviceId, uploadId: init.id });
+    try {
+      status = await callSunoProWorker('/suno/upload/status', { token, cookieHeader, deviceId, uploadId: init.id });
+    } catch (err) {
+      if (isRateLimitError(err) && rateLimitRetries < RATE_LIMIT_MAX_RETRIES) {
+        rateLimitRetries++;
+        const waitMs = Math.min(Math.max(err.retryAfterMs || 60000, 15000), 120000);
+        await waitWithRateLimitCountdown(progress, waitMs, 'kiểm tra trạng thái upload');
+        deadline += waitMs;
+        continue;
+      }
+      throw err;
+    }
     if (status.done) break;
     const elapsed = Math.round((Date.now() - pollStarted) / 1000);
     if (elapsed - lastProgress >= 4) {
@@ -1140,7 +1204,8 @@ ipcMain.handle('suno-upload', async (event, payload) => {
   if (!status || !status.done) throw new Error('Hết thời gian chờ Suno xử lý file (5 phút). Thử lại.');
 
   progress('Đang ghi bài vào thư viện Suno…');
-  const final = await callSunoProWorker('/suno/upload/initialize-clip', { token, cookieHeader, deviceId, uploadId: init.id, title, artist });
+  const final = await withRateLimitRetry(progress, 'ghi bài vào thư viện', () =>
+    callSunoProWorker('/suno/upload/initialize-clip', { token, cookieHeader, deviceId, uploadId: init.id, title, artist }));
   return { clipId: final.clipId, songUrl: final.songUrl, metadataApplied: final.metadataApplied, muted: final.copyrightMuted };
 });
 
@@ -1397,35 +1462,79 @@ ipcMain.handle('suno-split-export', async (event, payload) => {
   throw new Error('Suno render quá lâu (>10 phút) — mở Studio kiểm tra trực tiếp.');
 });
 
-// ─── Xử lý + lưu thay đổi trong Studio — giờ chạy NGAY TRÊN WORKER (Cloudflare Browser
-// Rendering), không còn mở BrowserWindow nào trên máy người dùng nữa. Toàn bộ kỹ thuật thực hiện
-// đã chuyển sang phía server — handler này chỉ còn là lớp gọi mỏng: gửi session + link Studio,
-// nhận kết quả + log về ghi lại debug.log như cũ (dồn 1 lần khi xong, không streaming realtime
-// được vì server chạy xong mới trả lời).
+// ─── Xử lý + lưu thay đổi trong Studio — chạy NGAY TRÊN WORKER (Cloudflare Browser Rendering),
+// không còn mở BrowserWindow nào trên máy người dùng nữa. Worker xếp job vào hàng đợi công bằng
+// (StudioQueueDO — xem worker/src/studio-queue-do.ts) thay vì chạy ngay khi gọi, vì nhiều người
+// dùng cùng lúc dễ giành nhau mở trình duyệt gây 429. Handler này: gửi job (start), rồi TỰ POLL
+// trạng thái mỗi vài giây (giống suno-split-export/suno-edit-fade/suno-generate đã có) để báo
+// trực tiếp cho người dùng "đang xếp hàng (còn N người)" hay "đang xử lý: <bước>" qua progress(),
+// thay vì treo im lặng chờ 1 lần duy nhất tới khi xong như trước.
 ipcMain.handle('suno-studio-agent-step', async (event, payload) => {
   requireSunoProLicense();
   if (!payload || typeof payload !== 'object') throw new Error('Payload không hợp lệ');
   const { studioUrl, session, pitchSemitones } = payload;
   if (!studioUrl) throw new Error('Thiếu link Studio.');
   const { token, cookieHeader, deviceId } = await sunoResolveToken(session);
-  const res = await callSunoProWorker('/suno/studio/automate-reverse', {
+  const progress = (msg) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('suno-upload-progress', msg);
+  };
+
+  const startRes = await callSunoProWorker('/suno/studio/automate-reverse/start', {
     token,
     cookieHeader,
     deviceId,
     studioUrl,
     pitchSemitones: Number(pitchSemitones) || 0,
   });
-  // Worker trả `logs` kèm `ts` (thời điểm THẬT từng dòng xảy ra trên server) — ghi lại đúng mốc
-  // đó thay vì giờ hiện tại, để debug.log phản ánh đúng diễn biến từng bước (không bị dồn cục
-  // vào 1 thời điểm do cả quá trình chỉ trả kết quả về 1 lần duy nhất khi xong).
-  if (Array.isArray(res && res.logs)) {
-    for (const entry of res.logs) {
+  const jobId = startRes && startRes.jobId;
+  if (!jobId) throw new Error('Worker không trả về jobId cho hàng đợi Studio.');
+
+  // 12 phút — đủ dư cho: thời gian xếp hàng (tuỳ số người đang dùng cùng lúc) + deadline tổng 7
+  // phút của chính automation + thời gian retry mở trình duyệt khi bị 429 lúc đông người dùng
+  // (xem worker/src/suno-studio-automation.ts::OVERALL_DEADLINE_MS).
+  const deadline = Date.now() + 12 * 60 * 1000;
+  let reportedLogCount = 0;
+  let lastQueuePos = null;
+  let lastRunningStep = null;
+
+  function flushNewLogs(logs) {
+    if (!Array.isArray(logs)) return;
+    for (; reportedLogCount < logs.length; reportedLogCount++) {
+      const entry = logs[reportedLogCount];
       const line = typeof entry === 'string' ? entry : (entry && entry.line) || '';
       const atIso = entry && typeof entry.ts === 'number' ? new Date(entry.ts).toISOString() : null;
       debugLogMain(`[reverse] ${line}`, atIso);
     }
   }
-  return { ok: true, settledByPoll: !!(res && res.settledByPoll) };
+
+  while (Date.now() < deadline) {
+    const statusRes = await callSunoProWorker(
+      `/suno/studio/automate-reverse/status?jobId=${encodeURIComponent(jobId)}`,
+      null,
+      'GET',
+    );
+    if (statusRes.status === 'queued') {
+      if (statusRes.queuePosition !== lastQueuePos) {
+        lastQueuePos = statusRes.queuePosition;
+        progress(`⏳ Đang xếp hàng xử lý trên Suno Studio — còn ${statusRes.queuePosition} lượt trước bạn (nhiều người đang dùng cùng lúc)…`);
+      }
+    } else if (statusRes.status === 'running') {
+      flushNewLogs(statusRes.logs);
+      if (statusRes.currentStep !== lastRunningStep) {
+        lastRunningStep = statusRes.currentStep;
+        progress(`▶ Đang xử lý trên Suno Studio: ${statusRes.currentStep || '…'}`);
+      }
+    } else if (statusRes.status === 'done') {
+      flushNewLogs(statusRes.logs);
+      progress('✅ Đã xử lý xong trên Suno Studio.');
+      return { ok: true, settledByPoll: !!(statusRes.result && statusRes.result.settledByPoll) };
+    } else if (statusRes.status === 'error') {
+      flushNewLogs(statusRes.logs);
+      throw new Error(statusRes.error || 'Automation Studio thất bại không rõ lý do.');
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  throw new Error('Quá thời gian chờ hàng đợi + xử lý trên Suno Studio (12 phút) — có thể do quá đông người dùng cùng lúc. Vui lòng thử lại sau ít phút.');
 });
 
 // Áp Fade Out cho 1 bài đã hoàn chỉnh (POST /a/api/edit/fade/{clipId}/ qua Worker), rồi tự poll

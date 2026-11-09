@@ -22,8 +22,6 @@ import {
   browser_token as wasmBrowserToken,
   classify_upload_status as wasmClassifyUploadStatus,
 } from "./suno-wasm/suno_wasm.js";
-import { runStudioReverseAutomation } from "./suno-studio-automation";
-
 const SUNO_API = "https://studio-api.prod.suno.com";
 const SUNO_STUDIO_HOSTS = ["https://studio-api.prod.suno.com", "https://studio-api-prod.suno.com"];
 const SUNO_USER_AGENT =
@@ -631,12 +629,14 @@ export async function studioInspect(request: Request, _env: Env): Promise<Respon
   return json({ title: proj.title || "", latestVersion: proj.latest_version_id || "", timing: state.timing || null, tracks });
 }
 
-/** `POST /suno/studio/automate-reverse { studioUrl, pitchSemitones? }` — chạy TOÀN BỘ bước gửi
- * lệnh AI Studio (reverse + điền ô "Semitones" nếu pitchSemitones khác 0 — nội dung/selector nằm
- * hẳn trong suno-studio-automation.ts, KHÔNG nhận từ client) rồi Export → Full Song NGAY TRÊN
- * SERVER bằng Cloudflare Browser Rendering. Trả thêm `logs` để app ghi lại debug.log y như trước
- * (không stream realtime được vì đây là 1 request chờ tới khi xong). */
-export async function studioAutomateReverse(request: Request, env: Env): Promise<Response> {
+/** `POST /suno/studio/automate-reverse/start { studioUrl, pitchSemitones? }` → `{ jobId,
+ * queuePosition }`. Thay vì chạy automation ngay trong request (treo tới khi xong, không điều
+ * phối được khi nhiều người cùng bấm), job được XẾP HÀNG qua StudioQueueDO (xem
+ * studio-queue-do.ts) — 1 instance DO DUY NHẤT dùng chung cho mọi người dùng (idFromName
+ * "global"), tự giới hạn số automation chạy thật đồng thời (MAX_CONCURRENT trong DO). App tự
+ * poll `/suno/studio/automate-reverse/status?jobId=...` để biết đang xếp hàng (còn bao nhiêu
+ * người) hay đang xử lý tới bước nào — xem electron/main.js, handler suno-studio-agent-step. */
+export async function studioAutomateReverseStart(request: Request, env: Env, licenseId: string): Promise<Response> {
   const body = await readJson<Record<string, unknown> & { studioUrl?: unknown; pitchSemitones?: unknown }>(request);
   const session = readSession(body);
   const studioUrl = cleanText(body.studioUrl, 500);
@@ -644,16 +644,31 @@ export async function studioAutomateReverse(request: Request, env: Env): Promise
   if (!session.cookieHeader) throw new HttpError(400, "missing_cookie", "Thiếu cookie phiên Suno — kết nối lại Suno Connect.");
   const pitchSemitonesRaw = typeof body.pitchSemitones === "number" ? body.pitchSemitones : Number(body.pitchSemitones);
   const pitchSemitones = Number.isFinite(pitchSemitonesRaw) ? Math.max(-24, Math.min(24, Math.round(pitchSemitonesRaw))) : 0;
-  // Kèm `ts` (thời điểm THẬT, ms epoch) cho mỗi dòng — vì cả quá trình chỉ trả kết quả về app
-  // 1 LẦN DUY NHẤT khi xong (không stream realtime được), nếu không có mốc thời gian thật thì
-  // app ghi lại debug.log sẽ bị dồn hết vào đúng 1 thời điểm, không phản ánh đúng diễn biến.
-  const logs: Array<{ ts: number; line: string }> = [];
-  const result = await runStudioReverseAutomation(
-    env,
-    { cookieHeader: session.cookieHeader, studioUrl, pitchSemitones },
-    (line) => logs.push({ ts: Date.now(), line }),
-  );
-  return json({ ...result, logs });
+  const stub = env.STUDIO_QUEUE.get(env.STUDIO_QUEUE.idFromName("global"));
+  const res = await stub.fetch("https://studio-queue/enqueue", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      licenseId,
+      opts: { cookieHeader: session.cookieHeader, studioUrl, pitchSemitones },
+    }),
+  });
+  const data = (await res.json()) as { jobId: string; queuePosition: number };
+  return json(data);
+}
+
+/** `GET /suno/studio/automate-reverse/status?jobId=...` — app tự poll (~3-4s/lần) tới khi
+ * `status` là "done"/"error". Trả `logs` kèm `ts` thật (ms epoch) để app ghi lại debug.log đúng
+ * mốc thời gian thật dù job chạy trên server khác hẳn tiến trình app. */
+export async function studioAutomateReverseStatus(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const jobId = cleanText(url.searchParams.get("jobId"), 100);
+  if (!jobId) throw new HttpError(400, "missing_fields", "Thiếu jobId.");
+  const stub = env.STUDIO_QUEUE.get(env.STUDIO_QUEUE.idFromName("global"));
+  const res = await stub.fetch(`https://studio-queue/status?jobId=${encodeURIComponent(jobId)}`);
+  if (res.status === 404) throw new HttpError(404, "not_found", "Không tìm thấy job (có thể đã bị dọn do quá cũ) — thử lại từ đầu.");
+  const data = await res.json();
+  return json(data);
 }
 
 /** `POST /suno/studio/export/start { projectId, title? }` → { renderId }. */

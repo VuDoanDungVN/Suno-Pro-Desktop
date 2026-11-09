@@ -4,6 +4,9 @@ interface Env {
   // server bằng @cloudflare/puppeteer, thay vì mở cửa sổ trên máy người dùng (xem
   // src/suno-studio-automation.ts).
   BROWSER: Fetcher;
+  // Hàng đợi công bằng cho automate-reverse — 1 instance DUY NHẤT dùng chung mọi người dùng
+  // (idFromName "global"), giới hạn số automation chạy thật đồng thời (xem studio-queue-do.ts).
+  STUDIO_QUEUE: DurableObjectNamespace;
   // Key "chủ" dự phòng (bypass toàn bộ license), tuỳ chọn — để trống nếu không cần.
   API_TOKEN?: string;
   // Khoá dùng mã hoá KEY gốc lưu trong D1 (key_enc) — chỉ Worker đọc lại được.
