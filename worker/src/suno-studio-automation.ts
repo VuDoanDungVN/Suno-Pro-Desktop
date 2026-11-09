@@ -215,7 +215,7 @@ export async function runStudioReverseAutomation(
               if (!canvas || !header) return false;
               const cRect = canvas.getBoundingClientRect();
               const hRect = header.getBoundingClientRect();
-              const x = cRect.left + cRect.width * 0.25;
+              const x = cRect.left + cRect.width * 0.28;
               const y = hRect.top + hRect.height / 2;
               return __spClick(canvas, x, y);
             })();
