@@ -4238,14 +4238,19 @@
       // khách hàng thường (role "desktop") đều ẩn hết cả mục menu lẫn icon ☰
       // trên popup tiến trình. Mặc định HTML đã để "hidden" sẵn (an toàn khi
       // chưa kịp xác minh) — hàm này chỉ GỠ hidden khi xác nhận đúng là owner.
+      // TẠM BẬT icon/menu log cho MỌI KEY (kể cả KEY khách hàng thường) để test trên staging —
+      // chỉ cần đổi true -> false ở dòng dưới rồi deploy lại staging là tắt về đúng hành vi cũ
+      // (chỉ KEY hệ thống/owner mới thấy). KHÔNG đụng vào logic quyền thật trên Worker, chỉ ẩn/hiện UI.
+      var TEMP_SHOW_LOG_FOR_ALL_KEYS = true;
       function applySystemKeyVisibility(isSystemKey) {
         window.__sunoIsSystemKey = !!isSystemKey;
+        var showLog = isSystemKey || TEMP_SHOW_LOG_FOR_ALL_KEYS;
         var logMenuItem = document.getElementById('menuOpenLogViewerBtn');
         var logPopupIcon = document.getElementById('uploadConfirmLogBtn');
         var reverseLogPopupIcon = document.getElementById('reverseLogBtn');
-        if (logMenuItem) logMenuItem.hidden = !isSystemKey;
-        if (logPopupIcon) logPopupIcon.hidden = !isSystemKey;
-        if (reverseLogPopupIcon) reverseLogPopupIcon.hidden = !isSystemKey;
+        if (logMenuItem) logMenuItem.hidden = !showLog;
+        if (logPopupIcon) logPopupIcon.hidden = !showLog;
+        if (reverseLogPopupIcon) reverseLogPopupIcon.hidden = !showLog;
       }
       // Tab "Nhiều link"/"Nhiều file" dành cho KEY 30 ngày ('d30'), 6 tháng ('d180') và 1 năm
       // ('d365') — KEY hệ thống (owner) luôn được dùng để tiện test, các KEY khác (1 ngày/dùng
