@@ -4602,13 +4602,13 @@
       var albumSongsSearchInput = document.getElementById('albumSongsSearchInput');
       var albumSongsTabs = document.getElementById('albumSongsTabs');
       var albumSongsDoneCount = document.getElementById('albumSongsDoneCount');
-      var albumSongsCache = []; // CHỈ trang hiện tại (10 bài/trang) — không phải cả album
+      var albumSongsCache = []; // CHỈ trang hiện tại (5 bài/trang) — không phải cả album
       var albumSongsFilter = 'all'; // 'all' | 'running' | 'done' | 'failed'
       var albumSongsPagination = document.getElementById('albumSongsPagination');
       var albumSongsPrevBtn = document.getElementById('albumSongsPrevBtn');
       var albumSongsNextBtn = document.getElementById('albumSongsNextBtn');
       var albumSongsPageLabel = document.getElementById('albumSongsPageLabel');
-      var ALBUM_SONGS_PAGE_SIZE = 10;
+      var ALBUM_SONGS_PAGE_SIZE = 5;
       var albumSongsPage = 1; // trang "Hoàn tất" đang xem (1-based) — reset về 1 mỗi khi mở lại album/đổi filter/tìm kiếm
       var albumSongsTotalDone = 0;
 
