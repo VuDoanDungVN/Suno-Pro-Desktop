@@ -2885,6 +2885,20 @@ ipcMain.handle('youtube-download', async (event, payload) => {
       // otherwise fall through and try the next client in the list
     }
   }
+  // YouTube tự đánh dấu video này là "LOGIN_REQUIRED" (giới hạn độ tuổi, giới hạn bởi chủ kênh…)
+  // — không phải lỗi tạm thời của 1 client, cả 5 client giả lập đều bị từ chối vì chính YouTube
+  // yêu cầu đăng nhập thật mới xem được. Báo rõ nguyên nhân thay vì log kỹ thuật khó hiểu.
+  const isLoginRequired = Boolean(
+    lastErr && (
+      (lastErr.info && lastErr.info.error_type === 'LOGIN_REQUIRED') ||
+      /login required/i.test(String(lastErr.message || lastErr))
+    ),
+  );
+  if (isLoginRequired) {
+    throw new Error(
+      'Video YouTube này yêu cầu đăng nhập mới xem được (có thể bị giới hạn độ tuổi hoặc bị chủ kênh giới hạn) — ứng dụng không hỗ trợ tải video dạng này. Vui lòng thử link YouTube khác.'
+    );
+  }
   throw new Error(
     'Không tải được audio sau khi thử ' + YT_DOWNLOAD_CLIENTS.length + ' client (' +
     YT_DOWNLOAD_CLIENTS.join(', ') + '). Lỗi cuối: ' +
